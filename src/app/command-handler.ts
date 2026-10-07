@@ -187,6 +187,41 @@ export async function handleSessionCommand(options: {
     return "handled";
   }
 
+  if (command?.name === "task") {
+    if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId || msg.chatType !== "p2p") {
+      await bot.reply(msg.messageId, "个人事项轨迹仅限所有者在私聊中查看。", hasThread);
+      return "handled";
+    }
+    const safe = (value: string, max = 300) => Array.from(value.replace(/[\r\n\t\u0000-\u001f\u007f]/g, " ")).slice(0, max).join("");
+    try {
+      if (command.action === "recent") {
+        const tasks = (await runtime.unifiedTaskStore.list())
+          .filter((item) => item.trusted.ownerId === trustedOwnerOpenId)
+          .sort((left, right) => right.createdAt.localeCompare(left.createdAt))
+          .slice(0, 5);
+        const lines = tasks.map((item) => `${item.id} · ${item.status} · ${item.trigger.source} · ${item.createdAt} · ${item.traceHistory.length} 个步骤`);
+        await bot.reply(msg.messageId, lines.length
+          ? `最近事项（最多 5 条）：\n${lines.join("\n")}\n查看轨迹：/task trace <事项ID>`
+          : "尚无可查看的个人事项。", hasThread);
+      } else {
+        const task = await runtime.unifiedTaskStore.get(command.taskId);
+        if (!task || task.trusted.ownerId !== trustedOwnerOpenId) {
+          await bot.reply(msg.messageId, "没有找到属于你的事项。", hasThread);
+          return "handled";
+        }
+        const lines = task.traceHistory.slice(-12).map((event) => {
+          const detail = [event.sourceId ? `来源 ${event.sourceId}` : undefined, event.artifactIds.length ? `产物 ${event.artifactIds.join(", ")}` : undefined, event.failureCode ? `失败阶段 ${event.failureCode}` : undefined]
+            .filter(Boolean).join("；");
+          return `${event.timestamp} · ${event.stage}${detail ? ` · ${detail}` : ""}`;
+        });
+        await bot.reply(msg.messageId, `事项 ${task.id} · ${task.status}\n${lines.join("\n") || "还没有可查看的轨迹步骤。"}\n这里只展示步骤、来源/产物标识和失败阶段，不包含原始提示词或执行内容。`, hasThread);
+      }
+    } catch {
+      await bot.reply(msg.messageId, "事项轨迹暂时不可用；未能读取本地任务记录。", hasThread);
+    }
+    return "handled";
+  }
+
   if (command?.name === "career") {
     if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId || msg.chatType !== "p2p") {
       await bot.reply(msg.messageId, "求职资料仅限所有者在私聊中使用。", hasThread);
@@ -385,6 +420,7 @@ export async function handleSessionCommand(options: {
       msg.messageId,
       [
         "/status 查看当前会话",
+        "/task recent 查看最近个人事项；/task trace <事项ID> 查看无正文的执行步骤",
         "/team 查看当前 Agent 团队",
         "/schedule <需求> 创建定时任务",
         "/schedules 查看定时任务",
@@ -395,7 +431,7 @@ export async function handleSessionCommand(options: {
         "/skills 查看个人能力包；/skills enable|disable <id> 管理能力包",
         "/career 查看求职准备；支持保存事实、岗位、简历草案审批和模拟面试反馈",
         "/daily add daily|reading|exploration <内容> 记录生活；/daily list 回顾最近记录；/daily recap <开始日期> <结束日期>",
-        "/reminder add <今天/明天/后天 时间> :: <内容>；/reminder list；/reminder cancel <ID>",
+        "/reminder add <今天/明天/后天 时间> :: <内容>；/reminder list；/reminder cancel|retry <ID>",
         "/memory confirm <id>、/memory correct <id> <内容>、/memory reject <id>、/memory forget <id>",
         "/schedule pause <id> 暂停定时任务",
         "/schedule resume <id> 恢复定时任务",

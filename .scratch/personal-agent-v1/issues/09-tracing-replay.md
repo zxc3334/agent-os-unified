@@ -20,5 +20,6 @@
 
 - Added content-free lifecycle trace events with opaque task/source/artifact IDs and failure codes. Trace history is persisted in the task record and survives restart via existing `get` / `list`; best-effort trace writes never change task outcomes, and legacy records load with empty history.
 - Added 25 versioned synthetic replay cases and basic version/result contract tests.
-- Remaining: user-facing matter-level trace inspection, stronger independent assertions for replay behavior (avoid fixtures that manufacture expected outputs), and privacy/revocation lifecycle integration. This ticket is not complete.
-- Verification after trace persistence: `pnpm test` (86/86 integrated), `pnpm build`, `git diff --check`.
+- Added owner-DM-only `/task recent` and `/task trace <id>` commands. They filter by trusted owner identity and expose only task state, content-free trace stages, source/artifact IDs, and failure codes—not prompt, result, or progress text. Tests verify owner gating and absence of private markers.
+- Remaining: stronger independent assertions for replay behavior (avoid fixtures that manufacture expected outputs), privacy/revocation lifecycle integration, and richer user-facing matter selection. This ticket is not complete.
+- Verification after trace persistence: `pnpm test` (89/89 integrated), `pnpm build`, `git diff --check`.

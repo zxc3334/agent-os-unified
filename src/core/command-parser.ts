@@ -17,6 +17,8 @@ export type SlashCommand =
   | { name: 'career'; action: 'feedback'; resumeId: string; summary: string; weakPoint: string }
   | { name: 'career'; action: 'review'; learningId: string; score: number }
   | { name: 'career'; action: 'due' }
+  | { name: 'task'; action: 'recent' }
+  | { name: 'task'; action: 'trace'; taskId: string }
   | { name: 'daily'; action: 'list' }
   | { name: 'daily'; action: 'add'; kind: 'daily' | 'reading' | 'exploration'; content: string; authorView?: string; userView?: string }
   | { name: 'daily'; action: 'recap'; from: string; through: string }
@@ -39,6 +41,7 @@ const SCHEDULES_RE = /^(?:@.+?\s+)?\/schedules\s*$/;
 const TOPICS_RE = /^(?:@.+?\s+)?\/topics\s*$/;
 const SKILLS_RE = /^(?:@.+?\s+)?\/skills(?:\s+([\s\S]+?))?\s*$/;
 const CAREER_RE = /^(?:@.+?\s+)?\/career(?:\s+([\s\S]+?))?\s*$/;
+const TASK_RE = /^(?:@.+?\s+)?\/task(?:\s+([\s\S]+?))?\s*$/;
 const DAILY_RE = /^(?:@.+?\s+)?\/daily(?:\s+([\s\S]+?))?\s*$/;
 const REMINDER_RE = /^(?:@.+?\s+)?\/reminder(?:\s+([\s\S]+?))?\s*$/;
 const MEMORY_RE = /^(?:@.+?\s+)?\/memory(?:\s+([\s\S]+?))?\s*$/;
@@ -86,6 +89,14 @@ export function parseCommand(text: string): SlashCommand | undefined {
     if (add?.[1]?.trim() && add[2]?.trim()) return { name: 'reminder', action: 'add', due: add[1]!.trim(), content: add[2]!.trim() };
     const edit = /^edit\s+([a-zA-Z0-9_-]{1,100})\s+([\s\S]+?)\s*::\s*([\s\S]+)$/.exec(args);
     if (edit?.[2]?.trim() && edit[3]?.trim()) return { name: 'reminder', action: 'edit', reminderId: edit[1]!, due: edit[2]!.trim(), content: edit[3]!.trim() };
+    return undefined;
+  }
+  const taskMatch = TASK_RE.exec(value);
+  if (taskMatch) {
+    const args = taskMatch[1]?.trim() ?? '';
+    if (!args || args === 'recent') return { name: 'task', action: 'recent' };
+    const trace = /^trace\s+([A-Za-z0-9][A-Za-z0-9._:-]{0,127})$/.exec(args);
+    if (trace) return { name: 'task', action: 'trace', taskId: trace[1]! };
     return undefined;
   }
   const careerMatch = CAREER_RE.exec(value);
