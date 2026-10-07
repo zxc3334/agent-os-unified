@@ -34,6 +34,10 @@ export interface MemoryCardEntry {
   weaknessAnalysis: string;
   corePrinciples: string;
   reviewQuestion: string;
+  /** Source event used for an extracted card; absent on legacy/imported cards. */
+  sourceMessageId?: string;
+  sourceActorId?: string;
+  sourceAt?: string;
 }
 
 export const REVIEW_INTERVALS = [1, 3, 7, 15] as const;
@@ -91,6 +95,9 @@ export function serializeMemoryCard(entry: MemoryCardEntry): string {
     `description: ${entry.description}`,
     `tags: [${entry.tags.join(', ')}]`,
     `created_at: ${entry.createdAt}`,
+    ...(entry.sourceMessageId ? [`source_message_id: ${JSON.stringify(entry.sourceMessageId)}`] : []),
+    ...(entry.sourceActorId ? [`source_actor_id: ${JSON.stringify(entry.sourceActorId)}`] : []),
+    ...(entry.sourceAt ? [`source_at: ${entry.sourceAt}`] : []),
     `next_review_at: ${entry.nextReviewAt}`,
     `repetition: ${entry.repetition}`,
     `interval_days: ${entry.intervalDays}`,
@@ -110,6 +117,16 @@ export function serializeMemoryCard(entry: MemoryCardEntry): string {
     `- **复习题目**：${entry.reviewQuestion}`,
     '',
   ].join('\n');
+}
+
+
+function parseYamlJsonString(value: string): string {
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return typeof parsed === 'string' ? parsed : value;
+  } catch {
+    return value;
+  }
 }
 
 export function parseMemoryCard(content: string): MemoryCardEntry | undefined {
@@ -154,6 +171,9 @@ export function parseMemoryCard(content: string): MemoryCardEntry | undefined {
     weaknessAnalysis: weaknessMatch ? weaknessMatch[1].trim() : '',
     corePrinciples: principlesMatch ? principlesMatch[1].trim() : '',
     reviewQuestion: questionMatch ? questionMatch[1].trim() : '',
+    ...(getField('source_message_id') ? { sourceMessageId: parseYamlJsonString(getField('source_message_id')) } : {}),
+    ...(getField('source_actor_id') ? { sourceActorId: parseYamlJsonString(getField('source_actor_id')) } : {}),
+    ...(getField('source_at') ? { sourceAt: getField('source_at') } : {}),
   };
 }
 

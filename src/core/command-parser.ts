@@ -8,6 +8,7 @@ export type SlashCommand =
   | { name: 'topics' }
   | { name: 'schedule'; request?: string }
   | { name: 'memory'; action: 'review' | 'recent'; page: number }
+  | { name: 'memory'; action: 'extract' }
   | { name: 'memory'; action: 'confirm' | 'reject' | 'forget'; entryId: string }
   | { name: 'memory'; action: 'correct'; entryId: string; content: string };
 
@@ -28,6 +29,9 @@ export function parseCommand(text: string): SlashCommand | undefined {
   if (memoryMatch) {
     const args = memoryMatch[1]?.trim().split(/\s+/, 3) ?? [];
     const action = args[0] || 'review';
+    if (action === 'extract') {
+      return args.length === 1 ? { name: 'memory', action } : undefined;
+    }
     if (action === 'review' || action === 'recent') {
       if (args.length > 2) return undefined;
       const page = args[1] === undefined ? 1 : Number(args[1]);

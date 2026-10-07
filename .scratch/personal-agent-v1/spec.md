@@ -5,6 +5,23 @@
 - Status: ready-for-agent
 - Publication: 用户已授权开始实施；测试接缝确认为统一任务执行 Interface。
 - Required triage on publication: `ready-for-agent`
+
+## Implementation Status
+
+Statuses below describe the checked-in implementation, not the intended final architecture. A ticket is only marked complete when its acceptance criteria have implementation and test evidence.
+
+| Ticket | Status | Evidence / remaining boundary |
+|---|---|---|
+| 01 可信记忆底座 | Complete | Local authoritative store, versioned corrections, owner/space authorization, durable-write tests. |
+| 02 提取恢复 | Complete | Eligible-message trigger, explicit `/memory extract`, restart recovery, frozen/idempotent batches, original source identity/time, retry tests. |
+| 03 记忆审查反馈 | Complete | Owner-only `/memory` review/confirm/correct/reject/forget commands with temporary-store tests. |
+| 04 统一任务运行时 | In progress | Core runtime and ordinary-message/scheduled adapters are wired. Collaboration, card continuations, product comments, cross-adapter integration and affair-native-session isolation remain. |
+| 05 个人入口与技能 | In progress | Owner-DM bounded memory context and scoped search/save MCP tools exist. Skill packs, affair selection/continuation and shared runtime context provider remain. |
+| 06 求职闭环 | Not started (blocked by 05) | No resume/project evidence workflow, mock-interview skill, or feedback-to-review integration yet. |
+| 07 日常记录与提醒 | Not started (blocked by 05) | No dated daily/read/exploration record flow or reminder lifecycle integration yet. |
+| 08 博客关联与草稿 | Not started (blocked by 06 and 07) | No authorized cross-space association proposals, stance-aware drafting, or public-use checks yet. |
+| 09 轨迹与回放 | Not started (blocked by 04) | Runtime persists basic task state, but explanatory trace, replay fixture set and per-case results are not implemented. |
+
 - 范围：按依赖顺序实施个人自用的渐进式改造，不是通用 SaaS。
 - 发布位置：遵循仓库提供的 Local Markdown Issue Tracker 约定。
 

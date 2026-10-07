@@ -15,8 +15,10 @@ export interface DialogueRecord {
   threadId: string;
   user: string;
   bot: string;
-  /** ISO 时间戳。 */
+  /** ISO 时间戳（Feishu 原始事件时间，缺失时使用接收时间）。 */
   at: string;
+  /** Authenticated user identity from the Feishu event envelope. */
+  userActorId?: string;
 }
 
 export function dialogueFileForProject(project: string): string {

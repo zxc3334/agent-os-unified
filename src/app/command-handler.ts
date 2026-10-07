@@ -19,6 +19,7 @@ import { formatSessionStatus } from "./session-view.js";
 import type { AppRuntime } from "./runtime.js";
 import type { Scheduler } from "./scheduler.js";
 import type { PersonalMemoryStore } from "../core/personal-memory.js";
+import type { MemoryExtractionWorker } from "../core/memory-worker.js";
 
 export type CommandOutcome = "handled" | "continue";
 
@@ -36,6 +37,7 @@ export async function handleSessionCommand(options: {
   hasThread: boolean;
   personalMemoryStore?: PersonalMemoryStore;
   trustedOwnerOpenId?: string;
+  memoryExtractionWorker?: MemoryExtractionWorker;
 }): Promise<CommandOutcome> {
   const {
     runtime,
@@ -51,6 +53,7 @@ export async function handleSessionCommand(options: {
     hasThread,
     personalMemoryStore,
     trustedOwnerOpenId,
+    memoryExtractionWorker,
   } = options;
 
   if (!isNew && cliRequest && cliRequest.cliId !== session.cliId) {
@@ -72,6 +75,24 @@ export async function handleSessionCommand(options: {
       return "handled";
     }
     const safe = (value: string, max = 700) => Array.from(value.replace(/[\r\n\t\u0000-\u001f\u007f]/g, " ")).slice(0, max).join("");
+    if (command.action === "extract") {
+      if (!memoryExtractionWorker) {
+        await bot.reply(msg.messageId, "对话提取器暂不可用。", hasThread);
+        return "handled";
+      }
+      const project = config.project || "default";
+      await bot.reply(msg.messageId, `已开始为项目「${project}」提取待处理对话；完成或失败后会在此通知。`, hasThread);
+      void memoryExtractionWorker.processProjectDialogueBatch(project).then(async (result) => {
+        const text = result
+          ? `对话记忆提取完成：处理 ${result.completedSources} 条来源，游标到 ${result.cursor}。`
+          : `项目「${project}」没有待处理的对话记录。`;
+        await bot.reply(msg.messageId, text, hasThread);
+      }).catch(async (error) => {
+        console.error("[记忆Worker] 显式提取失败:", (error as Error).message);
+        await bot.reply(msg.messageId, `对话提取失败，记录未标记完成，可重试：${(error as Error).message}`, hasThread);
+      });
+      return "handled";
+    }
     try {
       const spaces = await personalMemoryStore.listSpaces();
       const authorizedSpaceIds = spaces.map((space) => space.id);
@@ -143,6 +164,7 @@ export async function handleSessionCommand(options: {
         "/schedules 查看定时任务",
         "/topics 扫描有哪些素材够写一篇博客了",
         "/memory [review|recent] [页码] 查看待确认或最近记忆（每页最多 5 条）",
+        "/memory extract 从当前项目待处理对话中恢复并执行学习记忆提取",
         "/memory confirm <id>、/memory correct <id> <内容>、/memory reject <id>、/memory forget <id>",
         "/schedule pause <id> 暂停定时任务",
         "/schedule resume <id> 恢复定时任务",

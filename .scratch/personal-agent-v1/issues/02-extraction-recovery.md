@@ -1,6 +1,6 @@
 # 可靠对话提取与游标恢复
 
-- Status: in-progress
+- Status: complete
 - Blocked by: 01-memory-substrate
 - Milestone: A
 - Spec: [spec.md](../spec.md)
@@ -19,7 +19,8 @@
 
 - Added persistent frozen-batch primitives and a restart-safe `MemoryExtractionWorker.processDialogueBatch` path with stable per-candidate operation IDs.
 - Unit tests cover multiple candidates, partial failure/retry, high-water freezing, restart recovery, and the legacy unrelated-plan cursor hook.
-- The ordinary scheduled-task runner no longer advances dialogue extraction cursors; only `MemoryExtractionWorker.processDialogueBatch` advances after committed frozen sources. Generic cursor advancement remains defensive against incomplete batches.
-- Verification: `pnpm test` (33 tests) and `pnpm build` pass.
-- Remaining: connect the dedicated batch path to an explicit extraction schedule/trigger.
+- Added automatic extraction after eligible tutoring/interview messages, bounded per-project batch coalescing, and startup recovery for unfinished eligible project batches. `/memory extract` is an owner-only manual trigger. Generic reminders and scheduled tasks do not advance extraction cursors.
+- Failed or unavailable model extraction now throws and leaves the frozen batch/cursor retryable; an explicit `should_record: false` result is the only no-op completion.
+- Extracted learning cards retain the trusted source message ID, actor ID, and original event time. New card IDs are stable per committed candidate, so retrying a persisted candidate is idempotent.
+- Verified freezing/high-water, multi-candidate writes, partial retry, restart recovery, concurrent arrivals, unavailable extractor, source attribution, and cursor isolation in temporary-storage tests. Full suite: `pnpm test` (37 tests); `pnpm build` passes.
 - Dialogue and task trigger timestamps now use the normalized Feishu `create_time` when available, with host receipt time as fallback; unit-tested.

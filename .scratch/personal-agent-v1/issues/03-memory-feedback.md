@@ -21,4 +21,4 @@
 - Memory commands require an exact sender match with configured `OWNER_OPEN_ID`; store owner and authorized spaces come from trusted configuration/store state, never command/model text. The store is rooted at `AGENT_OS_DATA_ROOT/personal-memory` (default `data/personal-memory`).
 - Mutations use current persisted versions. Corrections record a trusted message source. Forget replies only from the redacted persisted record; failures report no success. Rejection changes the candidate status without deleting its source.
 - Added public command-path tests backed by temporary storage for paging, safe formatting, owner denial, and confirm/correct/reject/forget persistence, plus parser compatibility coverage.
-- Verification: focused command-path tests pass (3/3) and `pnpm build` passes. Full `pnpm test` passes (26/26) and `pnpm build` passes.
+- Verification: focused command-path tests pass (3/3) and `pnpm build` passes. Full `pnpm test` passes (37/37) and `pnpm build` passes.

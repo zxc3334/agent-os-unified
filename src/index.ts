@@ -43,7 +43,8 @@ import { JsonProductSpecFlowStore } from './core/product-spec-store.js';
 import { persistMemorySubmission } from './core/persist-memory.js';
 import { scanCandidates, buildTopicPrompt } from './core/topic-scanner.js';
 import { MessageDeduplicator } from './core/dedup.js';
-import { appendDialogue } from './core/dialogue-store.js';
+import { appendDialogue, listDialogueProjects } from './core/dialogue-store.js';
+import { MemoryExtractionWorker, shouldExtractMemory, supportsMemoryExtraction } from './core/memory-worker.js';
 import {
   formatMemoryPromptContext,
 } from './core/memory.js';
@@ -119,6 +120,7 @@ const sessions = await SessionManager.open({
   ),
 });
 const activeRuns = new Map<string, ActiveRun>();
+const memoryExtractionWorker = new MemoryExtractionWorker();
 const contextWindows = new Map<string, number>();
 const botRuntimes = new Map<string, BotRuntime>();
 const processedCollaborationTurns = new Set<string>();
@@ -413,6 +415,7 @@ async function startConfiguredBot(
         hasThread,
         personalMemoryStore,
         trustedOwnerOpenId: configuredOwnerOpenId,
+        memoryExtractionWorker,
       });
       if (commandOutcome === 'handled') return;
 
@@ -918,7 +921,17 @@ async function startConfiguredBot(
               user: taskText,
               bot: finalResult.answer,
               at: msg.receivedAt,
+              userActorId: msg.senderOpenId,
             });
+            if (shouldExtractMemory({
+              userPrompt: taskText,
+              botAnswer: finalResult.answer,
+              role: config.role,
+            })) {
+              void memoryExtractionWorker.processProjectDialogueBatch(config.project).catch((error) => {
+                console.error('[记忆Worker] 自动提取失败，批次保留以便重试:', (error as Error).message);
+              });
+            }
           }
           if (!collaboration) {
             await sendResultNotification({
@@ -1180,6 +1193,19 @@ await Promise.all(
 );
 
 await scheduler.start();
+// Resume only the dedicated learning-extraction stream after restart. Ordinary
+// scheduled tasks never touch these cursors; failures remain retryable on the next
+// eligible message or an explicit /memory extract command.
+const availableDialogueProjects = new Set(await listDialogueProjects());
+const extractionProjects = [...new Set(botConfigs
+  .filter((config) => supportsMemoryExtraction(config.role))
+  .map((config) => config.project))];
+for (const project of extractionProjects) {
+  if (!availableDialogueProjects.has(project)) continue;
+  void memoryExtractionWorker.processProjectDialogueBatch(project).catch((error) => {
+    console.error(`[记忆Worker] 启动恢复失败 project=${project}:`, (error as Error).message);
+  });
+}
 startScheduleFileWatcher({ scheduler, filePath: scheduleFilePath });
 startScheduleApi({
   scheduler,

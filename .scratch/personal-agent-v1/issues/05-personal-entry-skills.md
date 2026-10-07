@@ -2,7 +2,6 @@
 
 - Status: in-progress
 - Blocked by: 04-unified-task-runtime
-- Blocked by: 04-unified-task-runtime, 03-memory-feedback
 - Milestone: B
 - Spec: [spec.md](../spec.md)
 
@@ -22,5 +21,5 @@
 - Added temporary-storage tests for owner/DM gating and space filtering.
 - Verification: `pnpm test` (27/27) and `pnpm build` pass.
 - Added an authorized on-demand `search_personal_memory` MCP tool. It uses the invocation token and host-supplied authorized space IDs; model arguments cannot choose owner, source, or access scope. Search results include space, confidence, and source IDs; no-hit is distinct from bridge failure.
-- Verification: `pnpm test` (34 tests) and `pnpm build` pass.
+- Verification: `pnpm test` (37 tests) and `pnpm build` pass.
 - Remaining: add explicit affair/space selection and enabled skill packs, and share memory-context preparation with scheduled/continuation adapters. The current automatic snapshot and on-demand search are wired only for the owner’s direct Feishu message path.

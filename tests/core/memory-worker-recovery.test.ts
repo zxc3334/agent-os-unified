@@ -12,6 +12,7 @@ import {
   type DialogueRecord,
 } from '../../src/core/dialogue-store.js';
 import { MemoryExtractionWorker, type ExtractedMemoryPayload } from '../../src/core/memory-worker.js';
+import { listMemoryCardEntries } from '../../src/core/memory.js';
 
 const originalRoot = process.env.AGENT_OS_DATA_ROOT;
 
@@ -36,6 +37,7 @@ function record(project: string, messageId: string, user = `question ${messageId
     user,
     bot: `answer ${messageId}`,
     at: '2026-10-07T12:00:00.000Z',
+    userActorId: 'authenticated-user',
   };
 }
 
@@ -150,4 +152,55 @@ test('an incomplete extraction source cannot advance the cursor via generic adva
     assert.equal((await readCursor())['project-a'] ?? 0, 0);
     assert.equal((await pendingDialogues('project-a')).records[0]?.messageId, 'message-1');
   });
+});
+
+test('explicit project extraction persists source identity and retries unavailable extraction without advancing', async () => {
+  await withDataRoot(async () => {
+    await appendDialogue(record('project-a', 'source-message-1', 'How does the runtime work?'));
+    const worker = new MemoryExtractionWorker({
+      llmExtractor: async () => candidate('runtime-isolation'),
+    });
+    const result = await worker.processProjectDialogueBatch('project-a');
+    assert.equal(result?.completedSources, 1);
+    const entries = await listMemoryCardEntries('project-a');
+    assert.equal(entries.length, 1);
+    assert.equal(entries[0]?.sourceMessageId, 'source-message-1');
+    assert.equal(entries[0]?.sourceActorId, 'authenticated-user');
+    assert.equal(entries[0]?.sourceAt, '2026-10-07T12:00:00.000Z');
+
+    await appendDialogue(record('project-a', 'source-message-2'));
+    const unavailable = new MemoryExtractionWorker({ llmExtractor: async () => undefined });
+    await assert.rejects(() => unavailable.processProjectDialogueBatch('project-a'), /保留以便重试/);
+    assert.equal((await readCursor())['project-a'], 1);
+    assert.equal((await pendingDialogues('project-a')).records[0]?.messageId, 'source-message-2');
+  });
+});
+
+test('same-worker extraction triggers coalesce and run a fresh batch for messages arriving mid-run', async () => {
+  await withDataRoot(async () => {
+    await appendDialogue(record('project-a', 'message-1'));
+    let extractionCalls = 0;
+    let worker!: MemoryExtractionWorker;
+    worker = new MemoryExtractionWorker({
+      llmExtractor: async () => {
+        extractionCalls += 1;
+        if (extractionCalls === 1) {
+          await appendDialogue(record('project-a', 'message-2'));
+          void worker.processProjectDialogueBatch('project-a');
+        }
+        return { should_record: false, topic: '', description: '' };
+      },
+    });
+    const result = await worker.processProjectDialogueBatch('project-a');
+    assert.equal(extractionCalls, 2);
+    assert.equal(result?.cursor, 2);
+    assert.deepEqual((await pendingDialogues('project-a')).records, []);
+  });
+});
+
+test('automatic extraction gate only accepts eligible tutor or interviewer messages', async () => {
+  const { shouldExtractMemory } = await import('../../src/core/memory-worker.js');
+  const longAnswer = '核心原理'.repeat(30);
+  assert.equal(shouldExtractMemory({ userPrompt: 'question', botAnswer: longAnswer, role: 'interviewer' }), true);
+  assert.equal(shouldExtractMemory({ userPrompt: 'question', botAnswer: longAnswer, role: 'general-assistant' }), false);
 });

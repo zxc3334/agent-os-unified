@@ -1,7 +1,7 @@
 # 统一任务执行与事项上下文
 
 - Status: in-progress
-- Blocked by: 01-memory-substrate, 02-extraction-recovery
+- Blocked by: None
 - Milestone: B
 - Spec: [spec.md](../spec.md)
 

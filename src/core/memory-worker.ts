@@ -1,4 +1,5 @@
 import { basename } from 'node:path';
+import { createHash } from 'node:crypto';
 import {
   advanceCursors,
   beginExtractionBatch,
@@ -115,6 +116,13 @@ export interface ExtractTaskContext {
  * 3. 识别多轮累积信号（连续深入交互 3 轮及以上）
  * 4. 兼容单轮自包含长篇解答
  */
+export function supportsMemoryExtraction(role: string): boolean {
+  const normalized = role.toLocaleLowerCase();
+  return ['interviewer', 'tutor', 'general-tutor'].includes(normalized)
+    || normalized.includes('tutor')
+    || normalized.includes('interviewer');
+}
+
 export function shouldExtractMemory(context: {
   userPrompt: string;
   botAnswer: string;
@@ -123,13 +131,7 @@ export function shouldExtractMemory(context: {
   historyTurnsCount?: number;
 }): boolean {
   const { botAnswer, role, historyTurnsCount } = context;
-  if (!botAnswer) return false;
-  const validRoles = ['interviewer', 'tutor', 'general-tutor'];
-  const isValidRole =
-    validRoles.includes(role) ||
-    role.includes('tutor') ||
-    role.includes('interviewer');
-  if (!isValidRole) return false;
+  if (!botAnswer || !supportsMemoryExtraction(role)) return false;
 
   // 1. 强收敛信号：导师输出自然语言打分评定（例如 [复习评定: 5/5] 或 [评定: 4]）
   if (parseReviewAssessmentFromAnswer(botAnswer) !== undefined) {
@@ -327,6 +329,7 @@ export class MemoryExtractionWorker {
   private currentProject = 'default';
   private readonly llmExtractor: LLMExtractFunction;
   private readonly queue: ExtractTaskContext[] = [];
+  private readonly projectBatchRuns = new Map<string, { promise: Promise<{ batchId: string; completedSources: number; cursor: number } | undefined>; requestedAgain: boolean }>();
   public readonly dialogueBuffer = new DialogueBuffer(8);
   private isProcessing = false;
 
@@ -372,6 +375,111 @@ export class MemoryExtractionWorker {
       completedSources: batch.sources.length,
       cursor: cursors[project] ?? batch.startIndex,
     };
+  }
+
+  /**
+   * Explicit, retryable project-learning extraction entry point. A missing model
+   * result is a failure (not an empty extraction), so it cannot advance the cursor.
+   */
+  async processProjectDialogueBatch(
+    project: string,
+  ): Promise<{ batchId: string; completedSources: number; cursor: number } | undefined> {
+    const active = this.projectBatchRuns.get(project);
+    if (active) {
+      active.requestedAgain = true;
+      return active.promise;
+    }
+    const run = { requestedAgain: false } as { promise: Promise<{ batchId: string; completedSources: number; cursor: number } | undefined>; requestedAgain: boolean };
+    run.promise = (async () => {
+      let result: { batchId: string; completedSources: number; cursor: number } | undefined;
+      for (let pass = 0; pass < 2; pass += 1) {
+        run.requestedAgain = false;
+        result = await this.processProjectDialogueBatchOnce(project);
+        if (!run.requestedAgain) break;
+      }
+      return result;
+    })().finally(() => {
+      this.projectBatchRuns.delete(project);
+    });
+    this.projectBatchRuns.set(project, run);
+    return run.promise;
+  }
+
+  private async processProjectDialogueBatchOnce(
+    project: string,
+  ): Promise<{ batchId: string; completedSources: number; cursor: number } | undefined> {
+    return this.processDialogueBatch(
+      project,
+      async (record) => {
+        const existingEntries = await listMemoryCardEntries(project);
+        const existingSummary = existingEntries
+          .filter((entry) => entry.status === 'active')
+          .slice(0, 40)
+          .map((entry) => `- ID: ${entry.id} | 主题: ${entry.topic} | 描述: ${entry.description}`)
+          .join('\n');
+        const extracted = await this.llmExtractor({
+          userPrompt: record.user,
+          botAnswer: record.bot,
+          projectName: project,
+          existingSummary,
+        });
+        if (!extracted) throw new Error('记忆提取器未能返回结果，批次保留以便重试');
+        return extracted;
+      },
+      async (candidate, operationId, record) => {
+        const entries = await listMemoryCardEntries(project);
+        const target = candidate.action === 'update' && candidate.existing_id
+          ? entries.find((entry) => entry.id === candidate.existing_id)
+          : undefined;
+        if (candidate.action === 'update' && candidate.existing_id && !target) {
+          throw new Error(`待更新的学习记忆不存在：${candidate.existing_id}`);
+        }
+        const content = {
+          topic: candidate.topic || '核心考点',
+          description: candidate.description || '',
+          tags: Array.isArray(candidate.tags) ? candidate.tags : [],
+          weaknessAnalysis: candidate.weakness_analysis || '',
+          corePrinciples: candidate.core_principles || '',
+          reviewQuestion: candidate.review_question || '',
+        };
+        if (target) {
+          await this.saveEntryAndIndex({
+            ...target,
+            ...content,
+            tags: [...new Set([...target.tags, ...content.tags])],
+            mastery: Number.isInteger(candidate.mastery) && Number(candidate.mastery) >= 1 && Number(candidate.mastery) <= 5
+              ? Number(candidate.mastery)
+              : target.mastery,
+            sourceMessageId: record.messageId,
+            ...(record.userActorId ? { sourceActorId: record.userActorId } : {}),
+            sourceAt: record.at,
+          });
+          return;
+        }
+        const operationHash = createHash('sha256').update(operationId).digest('hex').slice(0, 24);
+        const occurredAt = new Date(record.at);
+        const createdAt = Number.isFinite(occurredAt.getTime()) ? occurredAt.toISOString() : new Date().toISOString();
+        const nextReview = calculateNextReview(
+          { repetition: 0, mastery: Number(candidate.mastery) || 2, intervalDays: 1 },
+          Number(candidate.mastery) || 2,
+          new Date(createdAt),
+        );
+        await this.saveEntryAndIndex({
+          id: `mem-extract-${operationHash}`,
+          project,
+          ...content,
+          createdAt,
+          nextReviewAt: nextReview.nextReviewAt,
+          repetition: 0,
+          intervalDays: nextReview.intervalDays,
+          mastery: nextReview.mastery,
+          status: nextReview.status,
+          sourceMessageId: record.messageId,
+          ...(record.userActorId ? { sourceActorId: record.userActorId } : {}),
+          sourceAt: record.at,
+        });
+      },
+    );
   }
 
   /**
