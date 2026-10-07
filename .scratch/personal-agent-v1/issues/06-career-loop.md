@@ -45,5 +45,5 @@
 ### Owner-authorized natural-language feedback persistence
 
 - Added `save_career_interview_feedback` to the MCP application tools. It is gated by a short-lived loopback token issued only for the configured owner in a direct chat when the enabled `career-interview` skill matches the current natural-language message, the owner explicitly requested saving in that source message, and an active approved resume is present. The tool instructions require explicit owner request/consent; its invocation is single-use to avoid duplicate learning records from tool retries. It records the model’s summary and weak point against the trusted active resume and originating message as a `practice-feedback` learning record. It does not write career evidence. Non-owner, released-token, invalid-input, and resume-evidence-separation behavior is covered through the public bridge/domain surfaces.
-- Validation: focused career/skill/tool tests (11/11) and full `pnpm test` (118/118), `pnpm build`, `git diff --check`.
+- Validation: focused career/skill/tool tests (11/11) and full `pnpm test` (123/123), `pnpm build`, `git diff --check`.
 - This is a bounded slice, not Ticket 06 completion; the remaining gaps above stay open.
