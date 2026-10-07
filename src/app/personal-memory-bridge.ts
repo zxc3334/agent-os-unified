@@ -2,7 +2,7 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { PersonalMemoryStore, PersonalMemorySource } from '../core/personal-memory.js';
-import { confidenceFromTrustedSource, RememberPersonalMemorySchema } from '../core/personal-memory-tool.js';
+import { confidenceFromTrustedSource, RememberPersonalMemorySchema, SearchPersonalMemorySchema } from '../core/personal-memory-tool.js';
 
 export interface TrustedMemoryInvocation {
   actorId: string;
@@ -11,6 +11,7 @@ export interface TrustedMemoryInvocation {
   receivedAt: string;
   timezone: string;
   sourceText: string;
+  authorizedSpaceIds: string[];
 }
 
 interface Invocation extends TrustedMemoryInvocation { token: string }
@@ -55,7 +56,7 @@ export class PersonalMemoryToolBridge {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (request.method !== 'POST' || request.url !== '/api/personal-memory/remember') {
+    if (request.method !== 'POST' || !['/api/personal-memory/remember', '/api/personal-memory/search'].includes(request.url ?? '')) {
       return send(response, 404, { error: 'Not found' });
     }
     const token = request.headers['x-personal-memory-token'];
@@ -64,6 +65,20 @@ export class PersonalMemoryToolBridge {
 
     try {
       const body = await readJson(request);
+      if (request.url === '/api/personal-memory/search') {
+        const parsedSearch = SearchPersonalMemorySchema.safeParse(body);
+        if (!parsedSearch.success) return send(response, 400, { error: 'Invalid memory query', issues: parsedSearch.error.issues });
+        if (invocation.actorId !== invocation.ownerId) return send(response, 403, { error: 'Only the configured owner may search personal memories' });
+        const entries = await this.store.search(parsedSearch.data.query, {
+          authorizedSpaceIds: invocation.authorizedSpaceIds,
+          limit: parsedSearch.data.limit,
+        });
+        const spaces = new Map((await this.store.listSpaces()).map((space) => [space.id, space.name]));
+        return send(response, 200, { entries: entries.map((entry) => ({
+          id: entry.id, space: spaces.get(entry.spaceId) ?? '记忆空间', kind: entry.kind,
+          confidence: entry.confidence, content: entry.content, sources: entry.sources.map(({ sourceId, receivedAt }) => ({ sourceId, receivedAt })),
+        })) });
+      }
       const parsed = RememberPersonalMemorySchema.safeParse(body);
       if (!parsed.success) return send(response, 400, { error: 'Invalid memory input', issues: parsed.error.issues });
       if (invocation.actorId !== invocation.ownerId) return send(response, 403, { error: 'Only the configured owner may save personal memories' });

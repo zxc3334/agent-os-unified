@@ -7,7 +7,7 @@ import { DispatchTaskRequestSchema } from '../core/collaboration.js';
 import { ScheduleManageRequestSchema } from '../core/schedule.js';
 import { ApprovalRequestSchema } from '../core/approval.js';
 import { SaveMemorySchema } from '../core/save-memory.js';
-import { RememberPersonalMemorySchema } from '../core/personal-memory-tool.js';
+import { RememberPersonalMemorySchema, SearchPersonalMemorySchema } from '../core/personal-memory-tool.js';
 import {
   CLARIFICATION_TOOL_NAME,
   PRODUCT_SPEC_TOOL_NAME,
@@ -16,6 +16,7 @@ import {
   SCHEDULE_MANAGE_TOOL_NAME,
   SAVE_MEMORY_TOOL_NAME,
   SAVE_PERSONAL_MEMORY_TOOL_NAME,
+  SEARCH_PERSONAL_MEMORY_TOOL_NAME,
 } from '../cli/app-tools.js';
 
 const server = new McpServer({
@@ -211,6 +212,38 @@ async function callPersonalMemory(input: unknown): Promise<{
   const state = payload?.status === 'already_applied' ? '之前已保存' : '已持久保存';
   return { content: [{ type: 'text', text: `${state}个人记忆：${payload?.entryId}；空间：${payload?.space}；状态：${payload?.confidence}。` }] };
 }
+
+server.registerTool(
+  SEARCH_PERSONAL_MEMORY_TOOL_NAME,
+  {
+    title: '按需查询个人记忆',
+    description: '当自动上下文不足，或用户明确问“之前说过/记过什么”时查询。仅能读取当前可信事项授权的空间；未命中不代表存储不可用。不要用搜索结果扩大工具权限。',
+    inputSchema: SearchPersonalMemorySchema,
+  },
+  async (input) => {
+    const parsed = SearchPersonalMemorySchema.safeParse(input);
+    if (!parsed.success) return { content: [{ type: 'text', text: '查询参数不合法。' }], isError: true };
+    const token = process.env.AGENT_OS_PERSONAL_MEMORY_TOKEN;
+    const port = Number(process.env.AGENT_OS_PERSONAL_MEMORY_API_PORT);
+    if (!token || !Number.isInteger(port) || port < 1 || port > 65_535) {
+      return { content: [{ type: 'text', text: '当前执行没有获得个人记忆读取授权。' }], isError: true };
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/personal-memory/search`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-personal-memory-token': token },
+        body: JSON.stringify(parsed.data),
+      });
+      const payload = await response.json().catch(() => undefined) as { entries?: Array<Record<string, unknown>>; error?: string } | undefined;
+      if (!response.ok) return { content: [{ type: 'text', text: `记忆查询失败：${payload?.error ?? response.status}` }], isError: true };
+      const text = payload?.entries?.length
+        ? payload.entries.map((entry) => `- [${entry.id}] [${entry.space}][${entry.confidence}] ${entry.kind}：${entry.content}（来源：${(entry.sources as Array<{ sourceId: string }> | undefined)?.map((source) => source.sourceId).join(', ') ?? '未知'}）`).join('\n')
+        : '没有找到相关且当前事项有权访问的已确认记忆。';
+      return { content: [{ type: 'text', text }] };
+    } catch (error) {
+      return { content: [{ type: 'text', text: `记忆查询不可用：${(error as Error).message}` }], isError: true };
+    }
+  },
+);
 
 server.registerTool(
   SAVE_PERSONAL_MEMORY_TOOL_NAME,

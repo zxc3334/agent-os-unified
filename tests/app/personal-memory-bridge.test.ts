@@ -29,7 +29,7 @@ test('personal-memory tool reports success only after durable persistence', asyn
     const lease = bridge.issue({
       actorId: 'trusted-owner', ownerId: 'trusted-owner', sourceId: 'message-1',
       receivedAt: '2026-10-07T12:00:00.000Z', timezone: 'Asia/Shanghai',
-      sourceText: '记住我女朋友的生日是 10 月 9 日',
+      sourceText: '记住我女朋友的生日是 10 月 9 日', authorizedSpaceIds: [],
     });
     try {
       const response = await fetch(baseUrl, {
@@ -109,6 +109,33 @@ test('rejected memory suppresses only the rejected claim, not unrelated claims f
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
+});
+
+test('on-demand search is limited to trusted authorized spaces', async () => {
+  await withBridge(async ({ bridge, store, baseUrl }) => {
+    const privateSpace = await store.createSpace('日常生活');
+    const projectSpace = await store.createSpace('项目 Alpha');
+    const source = { sourceId: 'source', actorId: 'trusted-owner', receivedAt: '2026-10-07T12:00:00Z', timezone: 'Asia/Shanghai' };
+    await store.add({ spaceId: privateSpace.id, kind: 'preference', content: '我不吃香菜', confidence: 'user_stated', source });
+    await store.add({ spaceId: projectSpace.id, kind: 'fact', content: '项目 Alpha 使用 TypeScript', confidence: 'user_confirmed', source: { ...source, sourceId: 'source-2' } });
+    const lease = bridge.issue({
+      actorId: 'trusted-owner', ownerId: 'trusted-owner', sourceId: 'query-message',
+      receivedAt: '2026-10-07T13:00:00Z', timezone: 'Asia/Shanghai', sourceText: '项目 Alpha 的技术栈是什么？',
+      authorizedSpaceIds: [projectSpace.id],
+    });
+    try {
+      const response = await fetch(baseUrl.replace('/remember', '/search'), {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-personal-memory-token': lease.token },
+        body: JSON.stringify({ query: '项目 Alpha 技术栈', limit: 5 }),
+      });
+      assert.equal(response.status, 200);
+      const result = await response.json() as { entries: Array<{ content: string; space: string }> };
+      assert.deepEqual(result.entries.map((entry) => entry.content), ['项目 Alpha 使用 TypeScript']);
+      assert.equal(result.entries[0]?.space, '项目 Alpha');
+    } finally {
+      lease.release();
+    }
+  });
 });
 
 test('confidence is derived from trusted source wording, never tool arguments', () => {

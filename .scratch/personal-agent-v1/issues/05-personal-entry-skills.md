@@ -21,5 +21,6 @@
 - The primary existing Feishu message path now appends a bounded personal-memory snapshot for direct messages from the configured owner only. Query scope is passed as trusted authorized space IDs, and relevance filtering occurs inside that scope; group messages and non-owner actors receive no private personal-memory snapshot.
 - Added temporary-storage tests for owner/DM gating and space filtering.
 - Verification: `pnpm test` (27/27) and `pnpm build` pass.
-- Remaining: expose authorized detail lookup through the unified host/MCP seam, add explicit space/affair selection and enabled skill packs, and wire this context through scheduled/continuation paths.
-- The shared task runtime now wraps the ordinary Feishu message and scheduled CLI execution paths. The personal-memory snapshot is currently prepared by the message adapter; the runtime memory provider is not yet shared across continuation handlers.
+- Added an authorized on-demand `search_personal_memory` MCP tool. It uses the invocation token and host-supplied authorized space IDs; model arguments cannot choose owner, source, or access scope. Search results include space, confidence, and source IDs; no-hit is distinct from bridge failure.
+- Verification: `pnpm test` (34 tests) and `pnpm build` pass.
+- Remaining: add explicit affair/space selection and enabled skill packs, and share memory-context preparation with scheduled/continuation adapters. The current automatic snapshot and on-demand search are wired only for the owner’s direct Feishu message path.

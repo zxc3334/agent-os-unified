@@ -7,6 +7,7 @@ export const REQUEST_APPROVAL_TOOL_NAME = 'request_approval';
 export const SCHEDULE_MANAGE_TOOL_NAME = 'schedule_manage';
 export const SAVE_MEMORY_TOOL_NAME = 'save_memory';
 export const SAVE_PERSONAL_MEMORY_TOOL_NAME = 'save_personal_memory';
+export const SEARCH_PERSONAL_MEMORY_TOOL_NAME = 'search_personal_memory';
 export const CLAUDE_CLARIFICATION_TOOL_NAME =
   `mcp__agent_os__${CLARIFICATION_TOOL_NAME}`;
 export const CLAUDE_PRODUCT_SPEC_TOOL_NAME =

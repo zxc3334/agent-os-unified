@@ -562,6 +562,7 @@ async function startConfiguredBot(
             receivedAt: msg.receivedAt,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
             sourceText: msg.text,
+            authorizedSpaceIds: authorizedPersonalSpaceIds,
           })
         : undefined;
       const cliEnv: Record<string, string> = {
