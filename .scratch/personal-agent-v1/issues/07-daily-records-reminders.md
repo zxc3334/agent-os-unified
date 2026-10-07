@@ -49,3 +49,8 @@
 - Tests cover missing/ambiguous timing without writes, trusted actor/token checks, scheduling after durable creation, delivery-target binding, and CLI tool-name normalization.
 - Verification: `pnpm test` (114/114), `pnpm build`, `git diff --check`.
 - Remaining: richer feedback and summary/review integration; ticket remains in progress.
+
+
+- Current implementation update: owner-only `/daily delete <ID>` now removes record text, reading/exploration stance fields, and detaches any linked reminder without silently cancelling that independent task. Deleted rows persist as content-free tombstones and are excluded from recaps/retrieval; retry is idempotent. If scoped, the associated blog reference is invalidated before deletion.
+- Verification: `pnpm test` (118/118), `pnpm build`, `git diff --check`.
+- Remaining: natural-language daily-record delete flow, richer author/user feedback, and summary/review integration. Ticket remains in progress and still depends on broader Ticket 05 entry wiring.

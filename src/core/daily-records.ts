@@ -11,6 +11,8 @@ export interface DailyRecordSource {
 }
 export interface DailyRecord {
   id: string;
+  /** Missing in legacy v1 rows means active. Deleted rows retain only non-content provenance. */
+  status?: 'active' | 'deleted';
   operationId: string;
   kind: DailyRecordKind;
   date: string;
@@ -215,11 +217,11 @@ export class JsonDailyRecordsReminders {
     if (!['daily', 'reading', 'exploration'].includes(normalized.kind)) throw new Error('unsupported daily record kind');
     const existing = this.state.records.find((record) => record.operationId === normalized.operationId);
     if (existing) {
-      const { id: _id, createdAt: _createdAt, ...existingInput } = existing;
+      const { id: _id, createdAt: _createdAt, status: _status, ...existingInput } = existing;
       if (JSON.stringify(existingInput) !== JSON.stringify(normalized)) throw new Error('operationId already used for different record content');
       return structuredClone(existing);
     }
-    const record: DailyRecord = { id: randomUUID(), ...normalized, createdAt: source.receivedAt };
+    const record: DailyRecord = { id: randomUUID(), ...normalized, status: 'active', createdAt: source.receivedAt };
     this.mutate(() => { this.state.records.push(record); });
     return structuredClone(record);
   }
@@ -231,16 +233,35 @@ export class JsonDailyRecordsReminders {
     const from = options.from === undefined ? undefined : validDate(options.from);
     const through = options.through === undefined ? undefined : validDate(options.through);
     return structuredClone(this.state.records.filter((record) =>
-      (!from || record.date >= from) && (!through || record.date <= through)
+      record.status !== 'deleted'
+      && (!from || record.date >= from) && (!through || record.date <= through)
       && (options.scopeId === undefined || record.scopeId === options.scopeId),
     ).sort((a, b) => a.date.localeCompare(b.date) || a.createdAt.localeCompare(b.createdAt)));
   }
   setRecordScope(id: string, scopeId: string | null): DailyRecord | undefined {
     const record = this.state.records.find((item) => item.id === id);
-    if (!record) return undefined;
+    if (!record || record.status === 'deleted') return undefined;
     const next = { ...record, scopeId: scopeId === null ? null : nonEmpty(scopeId, 'scopeId', 300) };
     this.mutate(() => { this.state.records = this.state.records.map((item) => item.id === id ? next : item); });
     return structuredClone(next);
+  }
+  deleteRecord(id: string): DailyRecord | undefined {
+    const record = this.state.records.find((item) => item.id === id);
+    if (!record) return undefined;
+    if (record.status === 'deleted') return structuredClone(record);
+    const { authorView: _authorView, userView: _userView, observation: _observation,
+      hypothesis: _hypothesis, question: _question, ...metadata } = record;
+    const deleted: DailyRecord = { ...metadata, content: '', status: 'deleted' };
+    this.mutate(() => {
+      this.state.records = this.state.records.map((item) => item.id === id ? deleted : item);
+      // A reminder is its own explicit user request; deleting the source record must not silently cancel it.
+      this.state.reminders = this.state.reminders.map((reminder) => {
+        if (reminder.recordId !== id) return reminder;
+        const { recordId: _recordId, ...independentReminder } = reminder;
+        return independentReminder;
+      });
+    });
+    return structuredClone(deleted);
   }
   createReminder(input: CreateReminderInput): DailyReminder {
     if ((input.dueAt === undefined) === (input.relativeDue === undefined)) throw new Error('provide exactly one of dueAt or relativeDue');

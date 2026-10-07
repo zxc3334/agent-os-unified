@@ -29,7 +29,9 @@
 - Follow-up: owner-private `/memory reject|forget` and `/career material revoke` now tombstone the exact `(kind, spaceId, id)` reference in the blog-association store after the authoritative source mutation succeeds. Historical proposals/drafts remain auditable but are no longer reusable.
 - Tests verify that rejected/forgotten memories and revoked materials make existing proposal sources inactive; unauthorized material revocation does not tombstone the source.
 - Verification: `pnpm test` (115/115), `pnpm build`, `git diff --check`.
-- Remaining: daily-record deletion support, a durable cross-store outbox (the owner can retry a failed memory/material tombstone by repeating the forget/revoke command), and model-generated proposals/drafts remain. Ticket remains in progress.
+- Remaining: a durable cross-store outbox (the owner can retry a failed memory/material tombstone by repeating the forget/revoke command) and model-generated proposals/drafts remain. Ticket remains in progress.
 
 - Follow-up: changing a daily record’s scope now invalidates its exact reference in the old space before the record mutation; references in the new space remain independently eligible. The original record is retained unchanged.
 - Tests verify an existing proposal becomes inactive while the reclassified record and its content remain available in the new scope.
+
+- Follow-up: owner-private `/daily delete <ID>` now invalidates a scoped reference with reason `deleted` before clearing the source record’s text and stance fields. Existing reminders are detached rather than cancelled; tests cover persisted deletion, privacy cleanup, blog-reference invalidation, and reminder preservation.

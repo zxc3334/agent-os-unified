@@ -29,6 +29,7 @@ test('daily and reminder command parsing is bounded and rejects malformed comman
   assert.deepEqual(parseCommand('/daily add reading Read one chapter'), { name: 'daily', action: 'add', kind: 'reading', content: 'Read one chapter' });
   assert.deepEqual(parseCommand('/daily add reading Author argues attention is limited :: I think deliberate practice matters more'), { name: 'daily', action: 'add', kind: 'reading', content: '用户观点：I think deliberate practice matters more', authorView: 'Author argues attention is limited', userView: 'I think deliberate practice matters more' });
   assert.deepEqual(parseCommand('/daily scope record-1 reading'), { name: 'daily', action: 'scope', recordId: 'record-1', scopeId: 'reading' });
+  assert.deepEqual(parseCommand('/daily delete record-1'), { name: 'daily', action: 'delete', recordId: 'record-1' });
   assert.deepEqual(parseCommand('/reminder add 后天上午9点 :: Call mom'), { name: 'reminder', action: 'add', due: '后天上午9点', content: 'Call mom' });
   assert.deepEqual(parseCommand('/reminder edit reminder-1 明天 10:30 :: Call mom'), { name: 'reminder', action: 'edit', reminderId: 'reminder-1', due: '明天 10:30', content: 'Call mom' });
   assert.deepEqual(parseCommand('/reminder retry reminder-1'), { name: 'reminder', action: 'retry', reminderId: 'reminder-1' });
@@ -95,6 +96,37 @@ test('reclassifying a daily record invalidates old-space blog references but lea
     assert.equal(ctx.dailyRecords.getRecord(record.id)?.scopeId, 'career');
     assert.equal(ctx.dailyRecords.getRecord(record.id)?.content, 'Read about memory systems');
     assert.match(ctx.replies.at(-1)!, /旧空间中的博客引用已失效/);
+  } finally { await rm(ctx.directory, { recursive: true, force: true }); }
+});
+
+test('deleting a daily record clears content, invalidates blog references, and preserves independent reminders', async () => {
+  const ctx = await setup();
+  try {
+    await handleSessionCommand({ ...ctx.options, command: parseCommand('/daily add reading Author idea :: My response') });
+    const record = ctx.dailyRecords.listRecords()[0]!;
+    const reminder = ctx.dailyRecords.createReminder({
+      operationId: 'linked-reminder', content: 'Review this note', dueAt: '2026-10-08T10:00:00.000Z',
+      source: { sourceId: 'reminder-source', actorId: 'owner', receivedAt: '2026-10-07T10:00:00.000Z', timezone: 'UTC' },
+      recordId: record.id,
+    });
+    const blogAssociations = new JsonBlogAssociations(join(ctx.directory, 'blog.json'));
+    const proposal = blogAssociations.proposeAssociation({
+      initiatedBy: 'user', operationId: 'deleted-daily-source', actorId: 'owner',
+      createdAt: '2026-10-07T10:00:00.000Z', authorizedSpaceIds: ['reading', 'career'],
+      sources: [
+        { kind: 'daily-record', id: record.id, spaceId: 'reading' },
+        { kind: 'memory', id: 'career-memory', spaceId: 'career' },
+      ], reasoning: 'Potential relation.', intendedUse: 'Private blog draft.',
+    });
+    await handleSessionCommand({ ...ctx.options, blogAssociations, command: parseCommand(`/daily delete ${record.id}`) });
+    assert.equal(blogAssociations.areProposalSourcesActive(proposal.id), false);
+    assert.equal(ctx.dailyRecords.getRecord(record.id)?.status, 'deleted');
+    assert.equal(ctx.dailyRecords.getRecord(record.id)?.content, '');
+    assert.equal(ctx.dailyRecords.getRecord(record.id)?.authorView, undefined);
+    assert.deepEqual(ctx.dailyRecords.listRecords(), []);
+    assert.equal(ctx.dailyRecords.getReminder(reminder.id)?.status, 'scheduled');
+    assert.equal(ctx.dailyRecords.getReminder(reminder.id)?.recordId, undefined);
+    assert.match(ctx.replies.at(-1)!, /独立提醒不会被取消/);
   } finally { await rm(ctx.directory, { recursive: true, force: true }); }
 });
 

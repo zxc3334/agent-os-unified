@@ -149,7 +149,7 @@ export async function handleSessionCommand(options: {
           await bot.reply(msg.messageId, `已保存${command.kind === "daily" ? "日常" : command.kind === "reading" ? "阅读" : "探索"}记录 [${record.id}]（${record.date}）。这只是带日期的记录，不会自动变成长久偏好或提醒。`, hasThread);
         } else if (command.action === "scope") {
           const previous = dailyRecords.getRecord(command.recordId);
-          if (previous && previous.scopeId && previous.scopeId !== command.scopeId && blogAssociations) {
+          if (previous && previous.status !== "deleted" && previous.scopeId && previous.scopeId !== command.scopeId && blogAssociations) {
             // Invalidate first: if the record write later fails, stale citations still fail closed;
             // if invalidation itself fails, the old scope remains and this command can be retried.
             blogAssociations.invalidateSource(
@@ -158,6 +158,18 @@ export async function handleSessionCommand(options: {
           }
           const record = dailyRecords.setRecordScope(command.recordId, command.scopeId);
           await bot.reply(msg.messageId, record ? `记录 [${record.id}] 的归属已调整为「${record.scopeId ?? "未分类"}」${previous?.scopeId && previous.scopeId !== record.scopeId ? "，旧空间中的博客引用已失效" : ""}。` : "没有找到这条记录。", hasThread);
+        } else if (command.action === "delete") {
+          const previous = dailyRecords.getRecord(command.recordId);
+          if (previous && previous.scopeId && blogAssociations) {
+            // Repeating delete after a tombstone write failure retries invalidation before any further mutation.
+            blogAssociations.invalidateSource(
+              { kind: "daily-record", id: previous.id, spaceId: previous.scopeId }, "deleted", msg.receivedAt,
+            );
+          }
+          const deleted = dailyRecords.deleteRecord(command.recordId);
+          await bot.reply(msg.messageId, deleted
+            ? `记录 [${deleted.id}] 的正文及观点内容已删除，关联博客引用已失效；独立提醒不会被取消。`
+            : "没有找到这条日常记录。", hasThread);
         } else {
           const range = command.action === "recap"
             ? { from: command.from, through: command.through }
@@ -542,7 +554,7 @@ export async function handleSessionCommand(options: {
         "/memory extract 从当前项目待处理对话中恢复并执行学习记忆提取",
         "/skills 查看个人能力包；/skills enable|disable <id> 管理能力包",
         "/career 查看求职准备；支持证据/简历/面试反馈、待复习项，以及 material add|search|revoke 参考资料管理",
-        "/daily add daily|reading|exploration <内容> 记录生活；/daily list 回顾最近记录；/daily recap <开始日期> <结束日期>",
+        "/daily add daily|reading|exploration <内容> 记录生活；/daily list 回顾最近记录；/daily delete <ID> 删除记录正文；/daily recap <开始日期> <结束日期>",
         "/reminder add <今天/明天/后天 时间> :: <内容>；/reminder list；/reminder cancel|retry <ID>",
         "/memory confirm <id>、/memory correct <id> <内容>、/memory reject <id>、/memory forget <id>",
         "/schedule pause <id> 暂停定时任务",

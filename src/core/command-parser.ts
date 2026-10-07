@@ -29,6 +29,7 @@ export type SlashCommand =
   | { name: 'daily'; action: 'add'; kind: 'daily' | 'reading' | 'exploration'; content: string; authorView?: string; userView?: string }
   | { name: 'daily'; action: 'recap'; from: string; through: string }
   | { name: 'daily'; action: 'scope'; recordId: string; scopeId: string | null }
+  | { name: 'daily'; action: 'delete'; recordId: string }
   | { name: 'reminder'; action: 'list' }
   | { name: 'reminder'; action: 'add' | 'edit'; reminderId?: string; due: string; content: string }
   | { name: 'reminder'; action: 'cancel' | 'retry'; reminderId: string }
@@ -82,6 +83,8 @@ export function parseCommand(text: string): SlashCommand | undefined {
     if (add?.[2]?.trim()) return { name: 'daily', action: 'add', kind: add[1] as 'daily' | 'reading' | 'exploration', content: add[2].trim() };
     const recap = /^recap\s+(\d{4}-\d\d-\d\d)\s+(\d{4}-\d\d-\d\d)$/.exec(args);
     if (recap) return { name: 'daily', action: 'recap', from: recap[1]!, through: recap[2]! };
+    const remove = /^delete\s+([a-zA-Z0-9_-]{1,100})$/.exec(args);
+    if (remove) return { name: 'daily', action: 'delete', recordId: remove[1]! };
     const scope = /^scope\s+([a-zA-Z0-9_-]{1,100})\s+(none|[a-zA-Z0-9_-]{1,100})$/.exec(args);
     if (scope) return { name: 'daily', action: 'scope', recordId: scope[1]!, scopeId: scope[2] === 'none' ? null : scope[2]! };
     return undefined;

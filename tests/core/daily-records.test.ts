@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -127,4 +127,30 @@ test('recap is a date-bounded view with source ids and does not create lasting m
   assert.equal(recap.records.length, 1);
   assert.deepEqual(recap.sourceIds, ['message-1']);
   assert.deepEqual(store.listRecords().map((item) => item.date), ['2026-10-07', '2026-10-08']);
+});
+
+
+test('daily record deletion persists as a content-free tombstone and is idempotent', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-os-daily-delete-'));
+  const file = join(directory, 'records.json');
+  try {
+    const store = new JsonDailyRecordsReminders(file);
+    const record = store.createRecord({
+      operationId: 'delete-me', kind: 'reading', date: '2026-10-07', content: 'Private note',
+      authorView: 'Author claim', userView: 'My view', source,
+    });
+    const deleted = store.deleteRecord(record.id)!;
+    assert.equal(deleted.status, 'deleted');
+    assert.equal(deleted.content, '');
+    assert.equal(deleted.authorView, undefined);
+    assert.equal(deleted.userView, undefined);
+    assert.deepEqual(store.listRecords(), []);
+    assert.equal(store.setRecordScope(record.id, 'new-space'), undefined);
+    assert.deepEqual(store.deleteRecord(record.id), deleted);
+    const serialized = await readFile(file, 'utf8');
+    for (const privateText of ['Private note', 'Author claim', 'My view']) assert.equal(serialized.includes(privateText), false);
+    const reopened = new JsonDailyRecordsReminders(file);
+    assert.equal(reopened.getRecord(record.id)?.status, 'deleted');
+    assert.deepEqual(reopened.listRecords(), []);
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });
