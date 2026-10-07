@@ -35,12 +35,14 @@ test('one task run passes trusted scope to memory and executor and persists obse
   await withStore(async (filePath) => {
     const store = new JsonUnifiedTaskStore(filePath);
     let receivedContext: unknown;
+    let memoryQuery: string | undefined;
     const runtime = new UnifiedTaskRuntime({
       store,
       now: () => fixedTime,
       id: () => 'run-1',
       memoryContext: {
         async prepare(input) {
+          memoryQuery = input.query;
           assert.deepEqual(input.authorizedMemorySpaceIds, ['job-search', 'project-alpha']);
           assert.equal(input.ownerId, 'jackson');
           return { snippets: ['authorized project summary'] };
@@ -60,7 +62,7 @@ test('one task run passes trusted scope to memory and executor and persists obse
     });
 
     const transitions: string[] = [];
-    const result = await runtime.run(request(), (task) => transitions.push(task.status));
+    const result = await runtime.run({ ...request(), memoryQuery: 'find my project contributions' }, (task) => transitions.push(task.status));
     assert.equal(result.id, 'run-1');
     assert.equal(result.status, 'succeeded');
     assert.equal(result.affairId, 'career-search');
@@ -68,6 +70,8 @@ test('one task run passes trusted scope to memory and executor and persists obse
     assert.deepEqual(result.result, { summary: 'Notes are ready' });
     assert.equal(result.artifacts[0]?.id, 'artifact-1');
     assert.deepEqual(receivedContext, { snippets: ['authorized project summary'] });
+    assert.equal(memoryQuery, 'find my project contributions');
+    assert.equal(JSON.stringify(result).includes('find my project contributions'), false);
     assert.deepEqual(transitions, ['queued', 'running', 'running', 'succeeded']);
     assert.equal((await runtime.get('run-1'))?.progress, 'Preparing interview notes');
 

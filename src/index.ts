@@ -27,7 +27,7 @@ import {
 import { resolveMentions, extractResourceKeys } from './im/message-parser.js';
 import { parseCliRequest, parseCommand } from './core/command-parser.js';
 import { PersonalMemoryStore } from './core/personal-memory.js';
-import { preparePersonalMemoryContext } from './core/personal-memory-context.js';
+import { PersonalTaskMemoryProvider } from './app/personal-task-memory.js';
 import { PersonalMemoryToolBridge } from './app/personal-memory-bridge.js';
 import { JsonPersonalSkillRegistry } from './core/personal-skills.js';
 import { SessionManager } from './core/session-manager.js';
@@ -359,39 +359,20 @@ async function startConfiguredBot(
       const memoryContext = await formatMemoryPromptContext(config.project)
         .catch(() => undefined);
       let authorizedPersonalSpaceIds: string[] = [];
-      const personalMemoryContext = personalMemoryStore
+      if (personalMemoryStore
         && msg.chatType === 'p2p'
-        && msg.senderOpenId === configuredOwnerOpenId
-        ? await personalMemoryStore.listSpaces()
-          .then((spaces) => {
-            authorizedPersonalSpaceIds = spaces.map((space) => space.id);
-            return preparePersonalMemoryContext(personalMemoryStore, {
-              actorId: msg.senderOpenId,
-              trustedOwnerId: configuredOwnerOpenId,
-              directMessage: true,
-              query: taskText,
-              authorizedSpaceIds: spaces.map((space) => space.id),
-              maxEntries: 5,
-              maxCharacters: 3_000,
-            });
-          })
-          .then((context) => context.text)
+        && msg.senderOpenId === configuredOwnerOpenId) {
+        authorizedPersonalSpaceIds = await personalMemoryStore.listSpaces()
+          .then((spaces) => spaces.map((space) => space.id))
           .catch((error) => {
-            console.warn('[个人记忆] 相关上下文读取失败:', (error as Error).message);
-            return '';
-          })
-        : '';
+            console.warn('[个人记忆] 空间列表读取失败:', (error as Error).message);
+            return [];
+          });
+      }
       const personalSkillContext = await personalSkills.promptFor(taskText).catch((error) => {
         console.warn('[个人技能] 读取失败:', (error as Error).message);
         return '';
       });
-      const prompt = buildBotPrompt(
-        config,
-        taskText,
-        teamRegistry.contextFor(config.id),
-        agentOsConfig.defaultProductDeliveryMode,
-        [personalSkillContext, personalMemoryContext, memoryContext].filter(Boolean).join('\n\n'),
-      );
       const taskCardTitle = isCompacting
         ? '整理上下文'
         : cliAdapter.displayName;
@@ -600,11 +581,22 @@ async function startConfiguredBot(
             stats: undefined,
             toolCalls: undefined,
           }))
-        : new UnifiedTaskRuntime<void>({
+        : new UnifiedTaskRuntime({
             store: unifiedTaskStore,
-            memoryContext: { prepare: async () => undefined },
+            memoryContext: new PersonalTaskMemoryProvider({
+              store: personalMemoryStore,
+              directMessage: msg.chatType === 'p2p' && msg.senderOpenId === configuredOwnerOpenId,
+            }),
             executor: {
-              execute: async ({ signal }) => ({
+              execute: async ({ signal, memoryContext: personalTaskMemory }) => {
+                const prompt = buildBotPrompt(
+                  config,
+                  taskText,
+                  teamRegistry.contextFor(config.id),
+                  agentOsConfig.defaultProductDeliveryMode,
+                  [personalSkillContext, personalTaskMemory.text, memoryContext].filter(Boolean).join('\n\n'),
+                );
+                return {
                 outcome: 'succeeded',
                 result: await executeCli(
                   cliAdapter,
@@ -626,7 +618,8 @@ async function startConfiguredBot(
                   cliEnv,
                 ),
                 artifacts: [],
-              }),
+              };
+              },
             },
           }).run({
             trusted: { actorId: msg.senderOpenId, ownerId: ownerOpenId },
@@ -637,6 +630,7 @@ async function startConfiguredBot(
               occurredAt: msg.receivedAt,
             },
             authorizedMemorySpaceIds: authorizedPersonalSpaceIds,
+            memoryQuery: taskText,
             // Keep the durable task record minimal; raw prompt text stays in the
             // existing execution/session path rather than the task trace.
             input: { messageId: msg.messageId, botId: config.id, sessionId: session.id, cliId: cliAdapter.id },

@@ -74,6 +74,7 @@ export interface PrepareTaskMemoryContext {
   trigger: UnifiedTaskTrigger;
   authorizedMemorySpaceIds: readonly string[];
   input: unknown;
+  query?: string;
   signal: AbortSignal;
 }
 
@@ -106,6 +107,8 @@ export interface RunUnifiedTaskInput {
   /** Authorization is supplied by trusted application code, never by model output. */
   authorizedMemorySpaceIds: readonly string[];
   input: unknown;
+  /** Ephemeral query used for scoped context preparation; never persisted in the task record. */
+  memoryQuery?: string;
   signal: AbortSignal;
 }
 
@@ -177,6 +180,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
         trigger: clone(task.trigger),
         authorizedMemorySpaceIds: [...task.authorizedMemorySpaceIds],
         input: clone(task.input),
+        ...(request.memoryQuery === undefined ? {} : { query: request.memoryQuery }),
         signal: request.signal,
       });
       if (request.signal.aborted) {

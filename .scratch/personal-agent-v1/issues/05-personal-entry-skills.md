@@ -23,4 +23,6 @@
 - Added owner-only `/skills` commands and four small built-in packs (career/interview, reading, research/blog, daily records); activation is persisted and requires explicit enablement. Selection is keyword-based and adds process guidance only, never tools or permissions.
 - Added an authorized on-demand `search_personal_memory` MCP tool. It uses the invocation token and host-supplied authorized space IDs; model arguments cannot choose owner, source, or access scope. Search results include space, confidence, and source IDs; no-hit is distinct from bridge failure.
 - Verification: `pnpm test` (38 tests) and `pnpm build` pass.
-- Remaining: add explicit affair/space selection and share memory-context preparation with scheduled/continuation adapters. The current automatic snapshot and on-demand search are wired only for the owner’s direct Feishu message path.
+- The ordinary-message adapter now obtains its bounded memory snapshot through `UnifiedTaskRuntime`'s memory-context preparation seam. The actual query is ephemeral runtime input and is not persisted in the task trace; memory content is assembled into the CLI prompt only inside execution.
+- Verification: `pnpm test` (45/45), `pnpm build`, and `git diff --check` pass.
+- Remaining: explicit affair/space selection and context preparation for scheduled/continuation adapters. The current automatic snapshot and on-demand search remain restricted to the configured owner’s direct Feishu message path.
