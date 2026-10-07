@@ -9,6 +9,7 @@ import { markSessionIdle } from './session-view.js';
 import { UnifiedTaskRuntime, workflowAffairId } from './unified-task-runtime.js';
 import type { CliRunResult } from '../cli/types.js';
 import { PersonalTaskMemoryProvider } from './personal-task-memory.js';
+import { summarizeMemoryToolCalls } from './task-trace.js';
 
 export async function runScheduledTaskDirectly(options: {
   runtime: AppRuntime;
@@ -84,7 +85,15 @@ export async function runScheduledTaskDirectly(options: {
               }
             },
           });
-          return { outcome: result.failedToolCalls ? 'partial' : 'succeeded', result, artifacts: [] };
+          return {
+            outcome: result.failedToolCalls ? 'partial' : 'succeeded', result, artifacts: [],
+            memoryOperations: summarizeMemoryToolCalls(result.toolOutcomes),
+            ...(result.stats ? { usage: {
+              ...(result.stats.totalTokens === undefined ? {} : { totalTokens: result.stats.totalTokens }),
+              ...(result.stats.inputTokens === undefined ? {} : { inputTokens: result.stats.inputTokens }),
+              ...(result.stats.outputTokens === undefined ? {} : { outputTokens: result.stats.outputTokens }),
+            } } : {}),
+          };
         },
       },
     }).run({

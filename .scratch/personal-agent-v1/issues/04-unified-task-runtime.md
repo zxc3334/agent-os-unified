@@ -68,3 +68,11 @@
 - Selecting another matter clears the thread's native CLI session so the previous matter's history cannot leak into the new scope; legacy sessions without an affair ID receive the same isolation. A matter active in another thread cannot be selected.
 - Tests cover continuation after restart, summary/scope carryover, access denial, active-run denial, and native-session isolation. Current full branch verification: `pnpm test` (151/151), `pnpm build`, `git diff --check`.
 - Remaining: live Feishu validation of cross-thread selection, collaboration and continuation paths; ticket stays in progress.
+
+
+### Scheduled execution contract verification
+
+- Added public `runScheduledTaskDirectly` integration tests using a temporary session/task store and a local fake Codex executable. They verify trusted schedule identity and timestamp, explicit memory-space grant and injected-memory reference, durable success/partial/failure state, reported usage, memory-tool outcome trace, and session cleanup.
+- Codex adapter now emits structured tool-call events for Agent OS MCP tools beyond the prior workflow-only subset, allowing the shared runtime to observe terminal status without including arguments in task traces. Scheduled executions also map CLI usage and allowlisted memory-tool outcomes into the unified trace.
+- Verification on this branch: full `pnpm test` (157/157), `pnpm build`, and `git diff --check`.
+- Remaining: live Feishu smoke verification of collaboration, matter switching, and continuation behavior. Ticket remains in progress until the runtime environment can exercise those transport paths.

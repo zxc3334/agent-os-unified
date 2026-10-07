@@ -310,6 +310,7 @@ export async function handleSessionCommand(options: {
             event.skillVersions?.length ? `技能 ${event.skillVersions.map((skill) => `${skill.id}@${skill.version}`).join(", ")}` : undefined,
             event.memoryOperations?.length ? `记忆操作 ${event.memoryOperations.map((item) => `${item.operation}:${item.tool}=${item.status}`).join(", ")}` : undefined,
             event.memorySources?.length ? `使用记忆 ${event.memorySources.map((item) => `${item.id}@v${item.version}`).join(", ")}` : undefined,
+            event.materialReferences?.length ? `引用资料 ${event.materialReferences.map((item) => `${item.id}#L${item.startLine}-${item.endLine}`).join(", ")}` : undefined,
             event.durationMs === undefined ? undefined : `耗时 ${event.durationMs}ms`,
             usage,
             event.failureCode ? `失败阶段 ${event.failureCode}` : undefined,

@@ -112,11 +112,18 @@ test('trace records selected skill versions, memory operation outcomes, duration
     });
     const task = await runtime.run({
       ...request(), skillVersions: [{ id: 'career-interview', version: 1 }],
+      additionalMemorySources: [{ id: 'career-memory-2', version: 3 }],
+      materialReferences: [
+        { id: 'material-1', spaceId: 'project-alpha', startLine: 7, endLine: 8 },
+        { id: 'material-with-sensitive-title', spaceId: 'project-alpha', startLine: 1, endLine: 100 },
+      ],
     });
     const terminal = task.traceHistory.at(-1)!;
     assert.deepEqual(task.skillVersions, [{ id: 'career-interview', version: 1 }]);
     assert.deepEqual(terminal.skillVersions, [{ id: 'career-interview', version: 1 }]);
-    assert.deepEqual(task.traceHistory.find((event) => event.stage === 'context_prepared')?.memorySources, [{ id: 'mem-1', version: 2 }]);
+    const prepared = task.traceHistory.find((event) => event.stage === 'context_prepared');
+    assert.deepEqual(prepared?.memorySources, [{ id: 'mem-1', version: 2 }, { id: 'career-memory-2', version: 3 }]);
+    assert.deepEqual(prepared?.materialReferences, [{ id: 'material-1', spaceId: 'project-alpha', startLine: 7, endLine: 8 }]);
     assert.deepEqual(terminal.memoryOperations, [
       { tool: 'save_personal_memory', operation: 'write', status: 'succeeded' },
     ]);

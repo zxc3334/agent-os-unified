@@ -41,7 +41,7 @@ import { BlogWritingWorkflow } from './app/blog-writing-workflow.js';
 import { dailyRecordSearchProvider, personalMemorySearchProvider, textMaterialSearchProvider } from './core/blog-source-retriever.js';
 import { JsonTextMaterialLibrary } from './core/text-materials.js';
 import { CareerReviewSchedulerAdapter } from './core/review-scheduler.js';
-import { buildCareerContext } from './core/career-context.js';
+import { buildCareerContextSnapshot } from './core/career-context.js';
 import { JsonCareerReviewNotificationStore } from './core/career-review-notifications.js';
 import { CareerReviewNotificationScheduler } from './app/career-review-notification.js';
 import { PersonalReminderScheduler } from './app/personal-reminder-scheduler.js';
@@ -481,11 +481,11 @@ async function startConfiguredBot(
         return { prompt: '', versions: [] };
       });
       const personalSkillContext = personalSkillSelection.prompt;
-      const careerContext = personalMemoryStore
+      const careerContextSnapshot = personalMemoryStore
         && msg.chatType === 'p2p'
         && msg.senderOpenId === configuredOwnerOpenId
         && /简历|求职|实习|面试|项目深挖/.test(taskText)
-        ? await buildCareerContext({
+        ? await buildCareerContextSnapshot({
             query: taskText,
             authorizedSpaceIds: authorizedPersonalSpaceIds,
             career: careerPreparation,
@@ -493,9 +493,10 @@ async function startConfiguredBot(
             materials: textMaterials,
           }).catch((error) => {
             console.warn('[求职资料] 上下文读取失败:', (error as Error).message);
-            return '求职资料读取失败；不要把未核实内容当作事实，也不要声称已读取本地记录。';
+            return { text: '求职资料读取失败；不要把未核实内容当作事实，也不要声称已读取本地记录。', memoryReferences: [], materialReferences: [] };
           })
-        : '';
+        : { text: '', memoryReferences: [], materialReferences: [] };
+      const careerContext = careerContextSnapshot.text;
       const taskCardTitle = isCompacting
         ? '整理上下文'
         : cliAdapter.displayName;
@@ -831,6 +832,8 @@ async function startConfiguredBot(
             },
             authorizedMemorySpaceIds: authorizedPersonalSpaceIds,
             skillVersions: personalSkillSelection.versions,
+            additionalMemorySources: careerContextSnapshot.memoryReferences,
+            materialReferences: careerContextSnapshot.materialReferences,
             memoryQuery: taskText,
             // Keep the durable task record minimal; raw prompt text stays in the
             // existing execution/session path rather than the task trace.

@@ -3,7 +3,7 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
-import { buildCareerContext } from '../../src/core/career-context.js';
+import { buildCareerContext, buildCareerContextSnapshot } from '../../src/core/career-context.js';
 import { JsonCareerPreparation } from '../../src/core/career-preparation.js';
 import { PersonalMemoryStore } from '../../src/core/personal-memory.js';
 import { JsonTextMaterialLibrary } from '../../src/core/text-materials.js';
@@ -43,13 +43,17 @@ test('career context retrieves source-linked project memories only from explicit
       receivedAt: '2026-10-07T12:00:00.000Z',
     });
 
-    const context = await buildCareerContext({
+    const contextSnapshot = await buildCareerContextSnapshot({
       query: 'retry workflow', authorizedSpaceIds: [project.id], career, memories, materials,
     });
+    const context = contextSnapshot.text;
     assert.match(context, new RegExp(`记忆 \\[${authorized.entry.id}\\]`));
     assert.match(context, new RegExp(`资料 \\[${material.id}\\]`));
     assert.match(context, /不能直接成为简历事实/);
     assert.doesNotMatch(context, /Private retry medicine schedule/);
+    assert.deepEqual(contextSnapshot.memoryReferences, [{ id: authorized.entry.id, version: authorized.entry.version }]);
+    assert.deepEqual(contextSnapshot.materialReferences, [{ id: material.id, spaceId: project.id, startLine: 1, endLine: 1 }]);
+    assert.doesNotMatch(JSON.stringify(contextSnapshot.materialReferences), /Retry workflow uses an idempotent job key|Project Alpha notes/);
   });
 });
 

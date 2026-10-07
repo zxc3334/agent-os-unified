@@ -71,6 +71,7 @@ export type UnifiedTaskTraceStage =
  */
 export interface TaskSkillVersion { id: string; version: number }
 export interface TaskMemorySourceVersion { id: string; version: number }
+export interface TaskMaterialReference { id: string; spaceId: string; startLine: number; endLine: number }
 export interface TaskMemoryOperation {
   tool: string;
   operation: 'read' | 'write' | 'delete' | 'feedback';
@@ -93,6 +94,7 @@ export interface UnifiedTaskTraceEvent {
   skillVersions?: TaskSkillVersion[];
   memoryOperations?: TaskMemoryOperation[];
   memorySources?: TaskMemorySourceVersion[];
+  materialReferences?: TaskMaterialReference[];
   durationMs?: number;
   usage?: TaskUsage & { cost: 'unknown' };
   failureCode?: 'memory_context_unavailable' | 'execution_failed';
@@ -176,6 +178,10 @@ export interface RunUnifiedTaskInput {
   /** Authorization is supplied by trusted application code, never by model output. */
   authorizedMemorySpaceIds: readonly string[];
   skillVersions?: readonly TaskSkillVersion[];
+  /** Content-free, scope-checked references actually injected by host preparation. */
+  materialReferences?: readonly TaskMaterialReference[];
+  /** Other trusted memory sources included by domain-specific context builders. */
+  additionalMemorySources?: readonly TaskMemorySourceVersion[];
   input: unknown;
   /** Ephemeral query used for scoped context preparation; never persisted in the task record. */
   memoryQuery?: string;
@@ -262,7 +268,10 @@ export class UnifiedTaskRuntime<Context = unknown> {
       });
       let memorySources: readonly TaskMemorySourceVersion[] = [];
       try { memorySources = this.options.memoryContext.traceReferences?.(memoryContext) ?? []; } catch { /* diagnostics are best effort */ }
-      task = await this.trace(task, 'context_prepared', undefined, undefined, { memorySources });
+      task = await this.trace(task, 'context_prepared', undefined, undefined, {
+        memorySources: [...memorySources, ...(request.additionalMemorySources ?? [])],
+        materialReferences: request.materialReferences,
+      });
       phase = 'execution';
       if (request.signal.aborted) {
         task = await this.finish(task, 'cancelled', observe);
@@ -356,7 +365,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
     stage: UnifiedTaskTraceStage,
     artifactIds: readonly string[] = task.artifacts.map(({ id }) => id),
     failureCode?: UnifiedTaskTraceEvent['failureCode'],
-    metadata: { memoryOperations?: readonly TaskMemoryOperation[]; memorySources?: readonly TaskMemorySourceVersion[]; usage?: TaskUsage } = {},
+    metadata: { memoryOperations?: readonly TaskMemoryOperation[]; memorySources?: readonly TaskMemorySourceVersion[]; materialReferences?: readonly TaskMaterialReference[]; usage?: TaskUsage } = {},
   ): Promise<UnifiedTask> {
     const taskId = safeIdentifier(task.id);
     const sourceId = task.trigger.sourceId === undefined
@@ -376,6 +385,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
       ...(task.skillVersions.length ? { skillVersions: task.skillVersions.map((skill) => ({ ...skill })) } : {}),
       ...((metadata.memoryOperations?.length ?? 0) > 0 ? { memoryOperations: sanitizeMemoryOperations(metadata.memoryOperations ?? []) } : {}),
       ...((metadata.memorySources?.length ?? 0) > 0 ? { memorySources: sanitizeMemorySources(metadata.memorySources ?? []) } : {}),
+      ...((metadata.materialReferences?.length ?? 0) > 0 ? { materialReferences: sanitizeMaterialReferences(metadata.materialReferences ?? []) } : {}),
       ...(isTerminalTraceStage(stage) ? {
         ...(elapsedMilliseconds(task.startedAt, task.completedAt) === undefined ? {} : { durationMs: elapsedMilliseconds(task.startedAt, task.completedAt) }),
         usage: sanitizeUsage(metadata.usage),
@@ -555,6 +565,19 @@ function sanitizeMemorySources(sources: readonly TaskMemorySourceVersion[]): Tas
       || !Number.isSafeInteger(version) || version < 1 || seen.has(id)) return [];
     seen.add(id);
     return [{ id, version }];
+  }).slice(0, 10);
+}
+function sanitizeMaterialReferences(references: readonly TaskMaterialReference[]): TaskMaterialReference[] {
+  const seen = new Set<string>();
+  return references.flatMap(({ id, spaceId, startLine, endLine }) => {
+    const key = `${spaceId}:${id}:${startLine}-${endLine}`;
+    if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)
+      || typeof spaceId !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(spaceId)
+      || !Number.isSafeInteger(startLine) || startLine < 1
+      || !Number.isSafeInteger(endLine) || endLine < startLine || endLine - startLine > 39
+      || seen.has(key)) return [];
+    seen.add(key);
+    return [{ id, spaceId, startLine, endLine }];
   }).slice(0, 10);
 }
 function sanitizeUsage(usage?: TaskUsage): UnifiedTaskTraceEvent['usage'] {

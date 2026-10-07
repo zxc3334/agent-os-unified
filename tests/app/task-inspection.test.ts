@@ -22,6 +22,7 @@ function task(id: string, ownerId: string, trace = false): UnifiedTask {
         { tool: 'capture_daily_record', operation: 'write', status: 'unknown' },
       ],
       memorySources: [{ id: 'mem-1', version: 2 }],
+      materialReferences: [{ id: 'material-1', spaceId: 'project-alpha', startLine: 7, endLine: 8 }],
       durationMs: 1200, usage: { totalTokens: 100, cost: 'unknown' },
     }] : [],
   };
@@ -56,6 +57,7 @@ test('owner can list recent personal tasks and inspect content-free trace steps'
   assert.match(trace, /career-interview@1/);
   assert.match(trace, /记忆操作 write:save_personal_memory=succeeded, read:search_daily_records=failed, write:capture_daily_record=unknown/);
   assert.match(trace, /使用记忆 mem-1@v2/);
+  assert.match(trace, /引用资料 material-1#L7-8/);
   assert.match(trace, /耗时 1200ms/);
   assert.match(trace, /费用未知/);
   assert.doesNotMatch(trace, /PRIVATE-INPUT-MARKER|PRIVATE-RESULT-MARKER/);
