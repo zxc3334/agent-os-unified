@@ -35,3 +35,11 @@
 - Tests cover parser behavior, durable create/rename and owner-DM gate via temporary storage.
 - Verification: `pnpm test` (65/65), `pnpm build`, `git diff --check`.
 - Remaining: cross-thread affair selection/continuation and memory-context preparation for scheduled and continuation runs. Ticket remains in progress.
+
+### Scheduled and continuation task memory context
+
+- Approval, clarification (including product-spec retry), and document-comment continuations now use the shared bounded personal-memory provider and append retrieved text only as background context. The runtime receives only explicit `session.memorySpaceIds`; absent/legacy grants stay empty. Provider retrieval requires a non-empty query, checks actor against the trusted owner, filters within the authorized spaces, and keeps the existing 5-entry / 3,000-character bound. Prompts, answers, and retrieved memory remain ephemeral and are not written to task input/trace.
+- Scheduled runs now use the same context-preparation seam, but deliberately receive an empty authorized-space list. Existing scheduled-task records store creator and chat identity, not the originating matter's memory-space grant; identity alone is not permission. Do not infer a grant from chat ID, target bot, workspace, or schedule ownership. Extend only after a trusted matter-level grant is durably represented and safely propagated.
+- Document-comment events carry no comment body, so they do not perform broad/empty-query recall; they remain empty unless a meaningful trusted query becomes available.
+- Public behavior tests exercise a continuation prompt receiving only memory in its explicit session grant, excluding other spaces, and a continuation with no grant receiving no memory. Existing provider tests cover non-owner/group denial and empty grants.
+- Verification: focused continuation and memory-context tests pass; `pnpm build` and `git diff --check` pass. Ticket 05 remains in progress: scheduled-task grant persistence, cross-thread affair selection/continuation, and broader end-to-end Feishu flow validation remain open.

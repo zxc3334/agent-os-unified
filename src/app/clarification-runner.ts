@@ -22,7 +22,7 @@ import { markSessionIdle } from './session-view.js';
 import type { AppRuntime } from './runtime.js';
 import { assertProductSpecDocuments } from './product-spec-documents.js';
 import { ensureProductSpecSubmission } from './product-spec-submission.js';
-import { runContinuationThroughUnifiedTask } from './unified-task-continuation.js';
+import { runContinuationThroughUnifiedTask, withPersonalMemoryContext } from './unified-task-continuation.js';
 import { workflowAffairId } from './unified-task-runtime.js';
 import type { CliRunResult } from '../cli/types.js';
 
@@ -85,11 +85,13 @@ export async function continueClarificationFlow(options: {
       actorId: options.actorOpenId ?? flow.ownerOpenId,
       ownerId: flow.ownerOpenId,
       affairId: `${config.id}:${flow.taskId}`,
+      authorizedMemorySpaceIds: session.memorySpaceIds,
+      memoryQuery: formatClarificationAnswers(flow),
       input: { botId: config.id, sessionId: session.id, taskId: flow.taskId, answerCount: flow.answers.length },
       signal: run.signal,
-      execute: (signal) => executeCli(
+      execute: (signal, memoryContext) => executeCli(
         adapter,
-        formatClarificationAnswers(flow),
+        withPersonalMemoryContext(formatClarificationAnswers(flow), memoryContext),
         session.workspaceDir,
         session.cliSessionId,
         signal,
@@ -156,11 +158,13 @@ export async function continueClarificationFlow(options: {
           actorId: options.actorOpenId ?? flow.ownerOpenId,
           ownerId: flow.ownerOpenId,
           affairId: `${config.id}:${flow.taskId}`,
+          authorizedMemorySpaceIds: session.memorySpaceIds,
+          memoryQuery: retryPrompt,
           input: { botId: config.id, sessionId: session.id, taskId: flow.taskId, retry: true },
           signal: run.signal,
-          execute: (signal) => executeCli(
+          execute: (signal, memoryContext) => executeCli(
             adapter,
-            retryPrompt,
+            withPersonalMemoryContext(retryPrompt, memoryContext),
             session.workspaceDir,
             resultSessionId ?? session.cliSessionId,
             signal,

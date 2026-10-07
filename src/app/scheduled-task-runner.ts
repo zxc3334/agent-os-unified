@@ -8,6 +8,7 @@ import type { ScheduledTask } from '../core/schedule.js';
 import { markSessionIdle } from './session-view.js';
 import { UnifiedTaskRuntime, workflowAffairId } from './unified-task-runtime.js';
 import type { CliRunResult } from '../cli/types.js';
+import { PersonalTaskMemoryProvider } from './personal-task-memory.js';
 
 export async function runScheduledTaskDirectly(options: {
   runtime: AppRuntime;
@@ -42,24 +43,30 @@ export async function runScheduledTaskDirectly(options: {
   }
   await runtime.sessions.transition(session.id, 'active');
 
-  const prompt = buildBotPrompt(
-    target,
-    [
-      `这是一条由 Agent OS 发起的定时任务，计划触发时间：${scheduledFor}。`,
-      task.prompt,
-      '直接执行任务要求；如果任务要求把结果推送给你或其他用户，请自行完成推送。',
-    ].join('\n\n'),
-    runtime.teamRegistry.contextFor(target.id),
-    options.defaultProductDeliveryMode,
-  );
+  const taskText = [
+    `这是一条由 Agent OS 发起的定时任务，计划触发时间：${scheduledFor}。`,
+    task.prompt,
+    '直接执行任务要求；如果任务要求把结果推送给你或其他用户，请自行完成推送。',
+  ].join('\n\n');
   const adapter = getCliAdapter(session.cliId);
   const run = new AbortController();
   try {
-    const taskExecution = await new UnifiedTaskRuntime<void>({
+    const taskExecution = await new UnifiedTaskRuntime({
       store: runtime.unifiedTaskStore,
-      memoryContext: { prepare: async () => undefined },
+      memoryContext: new PersonalTaskMemoryProvider({
+        store: runtime.personalMemoryStore,
+        // Scheduled tasks do not persist the originating session's allowlist.
+        // Owner identity alone is not a space grant, so this remains empty.
+        directMessage: true,
+      }),
       executor: {
-        execute: async ({ signal }) => {
+        execute: async ({ signal, memoryContext }) => {
+          const prompt = buildBotPrompt(
+            target,
+            memoryContext.text ? `${taskText}\n\n${memoryContext.text}` : taskText,
+            runtime.teamRegistry.contextFor(target.id),
+            options.defaultProductDeliveryMode,
+          );
           const result = await runCli({
             adapter,
             prompt,
@@ -86,6 +93,7 @@ export async function runScheduledTaskDirectly(options: {
       affairId: workflowAffairId(`schedule:${task.id}`),
       trigger: { source: 'schedule', sourceId: `${task.id}:${scheduledFor}`, occurredAt: scheduledFor },
       authorizedMemorySpaceIds: [],
+      memoryQuery: task.prompt,
       input: { scheduleId: task.id, targetBotId: target.id },
       signal: run.signal,
     });

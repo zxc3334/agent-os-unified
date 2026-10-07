@@ -14,7 +14,7 @@ import { executeCli } from './cli-execution.js';
 import { sendResultNotification } from './notification-service.js';
 import { markSessionIdle } from './session-view.js';
 import type { AppRuntime } from './runtime.js';
-import { runContinuationThroughUnifiedTask } from './unified-task-continuation.js';
+import { runContinuationThroughUnifiedTask, withPersonalMemoryContext } from './unified-task-continuation.js';
 import { workflowAffairId } from './unified-task-runtime.js';
 import type { CliRunResult } from '../cli/types.js';
 
@@ -78,11 +78,13 @@ export async function continueApprovalFlow(options: {
       actorId: options.actorOpenId ?? 'system:approval-timeout',
       ownerId: flow.ownerOpenId,
       affairId: workflowAffairId(flow.taskId),
+      authorizedMemorySpaceIds: session.memorySpaceIds,
+      memoryQuery: formatApprovalDecision(flow),
       input: { botId: flow.botId, sessionId: session.id, taskId: flow.taskId },
       signal: run.signal,
-      execute: (signal) => executeCli(
+      execute: (signal, memoryContext) => executeCli(
         adapter,
-        formatApprovalDecision(flow),
+        withPersonalMemoryContext(formatApprovalDecision(flow), memoryContext),
         session.workspaceDir,
         session.cliSessionId,
         signal,

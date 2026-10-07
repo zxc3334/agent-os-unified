@@ -9,6 +9,7 @@ import type { SessionManager } from '../core/session-manager.js';
 import type { TeamRegistry } from '../core/team-registry.js';
 import type { UnifiedTaskStore } from './unified-task-runtime.js';
 import type { PersonalMemoryToolBridge } from './personal-memory-bridge.js';
+import type { PersonalMemoryStore } from '../core/personal-memory.js';
 
 export interface BotRuntime {
   config: BotConfig;
@@ -29,4 +30,6 @@ export interface AppRuntime {
   approvalFlows: ApprovalFlowStore;
   unifiedTaskStore: UnifiedTaskStore;
   personalMemoryBridge?: PersonalMemoryToolBridge;
+  /** Trusted private store used only with explicit matter-scoped space grants. */
+  personalMemoryStore?: PersonalMemoryStore;
 }

@@ -4,8 +4,9 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { JsonUnifiedTaskStore } from '../../src/app/unified-task-runtime.js';
-import { runContinuationThroughUnifiedTask } from '../../src/app/unified-task-continuation.js';
+import { runContinuationThroughUnifiedTask, withPersonalMemoryContext } from '../../src/app/unified-task-continuation.js';
 import type { AppRuntime } from '../../src/app/runtime.js';
+import { PersonalMemoryStore } from '../../src/core/personal-memory.js';
 
 async function withStore(run: (store: JsonUnifiedTaskStore, path: string) => Promise<void>) {
   const directory = await mkdtemp(join(tmpdir(), 'agent-os-continuation-'));
@@ -17,8 +18,8 @@ async function withStore(run: (store: JsonUnifiedTaskStore, path: string) => Pro
   }
 }
 
-function runtime(store: JsonUnifiedTaskStore): AppRuntime {
-  return { unifiedTaskStore: store } as AppRuntime;
+function runtime(store: JsonUnifiedTaskStore, personalMemoryStore?: PersonalMemoryStore): AppRuntime {
+  return { unifiedTaskStore: store, personalMemoryStore } as AppRuntime;
 }
 
 for (const source of ['approval', 'clarification', 'comment'] as const) {
@@ -89,4 +90,68 @@ test('continuation cancellation is persisted and surfaced as cancellation', asyn
     const [task] = await store.list('bot:task-10');
     assert.equal(task?.status, 'cancelled');
   });
+});
+
+test('continuation execution receives only bounded memory from its explicit session grant', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-os-continuation-memory-'));
+  try {
+    const memoryStore = new PersonalMemoryStore({ directory: join(directory, 'memory'), ownerId: 'trusted-owner' });
+    const career = await memoryStore.createSpace('求职');
+    const life = await memoryStore.createSpace('生活');
+    await memoryStore.add({
+      spaceId: career.id, kind: 'fact', content: '我负责过缓存一致性项目', confidence: 'user_confirmed',
+      source: { sourceId: 'career-source', actorId: 'trusted-owner', receivedAt: '2026-10-07T10:00:00Z', timezone: 'UTC' },
+    });
+    await memoryStore.add({
+      spaceId: life.id, kind: 'preference', content: '我不吃香菜', confidence: 'user_stated',
+      source: { sourceId: 'life-source', actorId: 'trusted-owner', receivedAt: '2026-10-07T10:00:00Z', timezone: 'UTC' },
+    });
+    const taskStore = new JsonUnifiedTaskStore(join(directory, 'tasks.json'));
+    let executedPrompt = '';
+    await runContinuationThroughUnifiedTask({
+      runtime: runtime(taskStore, memoryStore), source: 'clarification', sourceId: 'answer-1',
+      occurredAt: '2026-10-07T11:00:00.000Z', actorId: 'trusted-owner', ownerId: 'trusted-owner',
+      affairId: 'career:task-1', authorizedMemorySpaceIds: [career.id], memoryQuery: '缓存一致性项目',
+      input: { taskId: 'task-1' }, signal: new AbortController().signal,
+      execute: async (_signal, context) => {
+        executedPrompt = withPersonalMemoryContext('继续准备项目面试', context);
+        return 'continued';
+      },
+    });
+    assert.match(executedPrompt, /缓存一致性项目/);
+    assert.doesNotMatch(executedPrompt, /香菜/);
+    const [task] = await taskStore.list('career:task-1');
+    assert.deepEqual(task?.authorizedMemorySpaceIds, [career.id]);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
+test('continuation without a trusted matter grant receives no personal memory', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-os-continuation-no-grant-'));
+  try {
+    const memoryStore = new PersonalMemoryStore({ directory: join(directory, 'memory'), ownerId: 'trusted-owner' });
+    const space = await memoryStore.createSpace('求职');
+    await memoryStore.add({
+      spaceId: space.id, kind: 'fact', content: '缓存一致性项目', confidence: 'user_confirmed',
+      source: { sourceId: 'career-source', actorId: 'trusted-owner', receivedAt: '2026-10-07T10:00:00Z', timezone: 'UTC' },
+    });
+    const taskStore = new JsonUnifiedTaskStore(join(directory, 'tasks.json'));
+    let executedPrompt = '';
+    await runContinuationThroughUnifiedTask({
+      runtime: runtime(taskStore, memoryStore), source: 'approval', sourceId: 'approval-1',
+      occurredAt: '2026-10-07T11:00:00.000Z', actorId: 'trusted-owner', ownerId: 'trusted-owner',
+      affairId: 'workflow:task-2', memoryQuery: '缓存一致性', input: { taskId: 'task-2' },
+      signal: new AbortController().signal,
+      execute: async (_signal, context) => {
+        executedPrompt = withPersonalMemoryContext('继续执行', context);
+        return 'continued';
+      },
+    });
+    assert.equal(executedPrompt, '继续执行');
+    const [task] = await taskStore.list('workflow:task-2');
+    assert.deepEqual(task?.authorizedMemorySpaceIds, []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });

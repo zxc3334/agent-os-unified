@@ -16,6 +16,11 @@ export class PersonalTaskMemoryProvider implements TaskMemoryContextProvider<Tas
 
   async prepare(request: PrepareTaskMemoryContext): Promise<TaskPersonalMemoryContext> {
     if (!this.options.store) return { status: 'empty', text: '' };
+    // A missing query is not permission to inject a broad/recency-based dump.
+    // Likewise an empty allowlist means this caller has no trusted grant.
+    if (!request.query?.trim() || request.authorizedMemorySpaceIds.length === 0) {
+      return { status: 'empty', text: '' };
+    }
     try {
       return await preparePersonalMemoryContext(this.options.store, {
         actorId: request.actorId,

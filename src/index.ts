@@ -204,6 +204,7 @@ const runtime: AppRuntime = {
   approvalFlows,
   unifiedTaskStore,
   personalMemoryBridge,
+  personalMemoryStore,
 };
 function persistBotIdentities(): void {
   const identities = Object.fromEntries(
