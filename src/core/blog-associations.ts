@@ -8,6 +8,13 @@ export type AssociationDecision = 'accepted' | 'rejected' | 'no-connection';
 export type BlogSourceKind = 'memory' | 'material' | 'daily-record';
 export type PublicUseAuthorization = 'authorized' | 'denied';
 export type BlogDraftStance = 'user-claim' | 'author-view' | 'assistant-suggestion' | 'hypothesis';
+export type BlogSourceInvalidationReason = 'revoked' | 'deleted';
+
+export interface BlogSourceInvalidation {
+  source: BlogSourceReference;
+  reason: BlogSourceInvalidationReason;
+  invalidatedAt: string;
+}
 
 /** A reference only. Source content is intentionally never copied into this domain store. */
 export interface BlogSourceReference {
@@ -46,6 +53,8 @@ interface StoreState {
   proposals: AssociationProposal[];
   publicUseAuthorizations: Array<{ proposalId: string; sourceId: string; authorization: PublicUseAuthorization; updatedAt: string }>;
   drafts: StancePreservingBlogDraft[];
+  /** Optional for migration: schemaVersion 1 stores created before invalidation support omit this field. */
+  invalidatedSources?: BlogSourceInvalidation[];
 }
 export interface ProposeAssociationInput {
   /** The host must call this only for an explicit user-triggered association request. */
@@ -83,7 +92,10 @@ function iso(value: string, field: string): string {
   return new Date(normalized).toISOString();
 }
 function emptyState(): StoreState {
-  return { schemaVersion: 1, proposals: [], publicUseAuthorizations: [], drafts: [] };
+  return { schemaVersion: 1, proposals: [], publicUseAuthorizations: [], drafts: [], invalidatedSources: [] };
+}
+function sourceKey(source: BlogSourceReference): string {
+  return JSON.stringify([source.kind, source.spaceId, source.id]);
 }
 function readState(path: string): StoreState {
   try {
@@ -92,7 +104,9 @@ function readState(path: string): StoreState {
       || !Array.isArray(parsed.publicUseAuthorizations) || !Array.isArray(parsed.drafts)) {
       throw new Error('unsupported blog association store schema');
     }
-    return parsed;
+    // Older v1 files predate source invalidation. Treat their references as active until
+    // an authoritative caller records a revocation/deletion; do not rewrite or discard them.
+    return { ...parsed, invalidatedSources: Array.isArray(parsed.invalidatedSources) ? parsed.invalidatedSources : [] };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') return emptyState();
     throw error;
@@ -154,6 +168,8 @@ export class JsonBlogAssociations {
     const createdAt = iso(input.createdAt, 'createdAt');
     const authorized = new Set(input.authorizedSpaceIds.map((id) => nonEmpty(id, 'authorizedSpaceId', 300)));
     const sources = input.sources.map(normalizeSource);
+    const invalidated = sources.filter((source) => this.isSourceInvalidated(source));
+    if (invalidated.length) throw new Error(`proposal references revoked or deleted source(s): ${invalidated.map((source) => source.id).join(', ')}`);
     if (sources.length < 2) throw new Error('an association proposal requires at least two sources');
     if (new Set(sources.map((source) => source.id)).size !== sources.length) throw new Error('source ids must be unique');
     const unauthorized = sources.filter((source) => !authorized.has(source.spaceId));
@@ -180,11 +196,33 @@ export class JsonBlogAssociations {
   }
   listProposals(): AssociationProposal[] { return structuredClone(this.state.proposals); }
 
+  /** Tombstones one exact source reference. This is idempotent and intentionally irreversible. */
+  invalidateSource(
+    sourceInput: BlogSourceReference, reason: BlogSourceInvalidationReason, invalidatedAt: string,
+  ): void {
+    if (!['revoked', 'deleted'].includes(reason)) throw new Error('unsupported source invalidation reason');
+    const source = normalizeSource(sourceInput);
+    const record: BlogSourceInvalidation = { source, reason, invalidatedAt: iso(invalidatedAt, 'invalidatedAt') };
+    const key = sourceKey(source);
+    const existing = (this.state.invalidatedSources ?? []).find((item) => sourceKey(item.source) === key);
+    if (existing) return;
+    this.mutate(() => { (this.state.invalidatedSources ??= []).push(record); });
+  }
+
+  /** True only while every source reference in the proposal remains usable. */
+  areProposalSourcesActive(proposalId: string): boolean {
+    const proposal = this.state.proposals.find((item) => item.id === proposalId);
+    return !!proposal && proposal.sources.every((source) => !this.isSourceInvalidated(source));
+  }
+
   decide(proposalId: string, decision: AssociationDecision, decidedAt: string): AssociationProposal | undefined {
     if (!['accepted', 'rejected', 'no-connection'].includes(decision)) throw new Error('unsupported association decision');
     const current = this.state.proposals.find((item) => item.id === proposalId);
     if (!current) return undefined;
     if (current.decision && current.decision !== decision) throw new Error('association decision is final');
+    if (decision === 'accepted' && !this.areProposalSourcesActive(proposalId)) {
+      throw new Error('cannot accept an association with revoked or deleted sources');
+    }
     const updated = { ...current, decision, decidedAt: iso(decidedAt, 'decidedAt') };
     this.mutate(() => { this.state.proposals = this.state.proposals.map((item) => item.id === proposalId ? updated : item); });
     return structuredClone(updated);
@@ -196,7 +234,9 @@ export class JsonBlogAssociations {
   ): void {
     if (!['authorized', 'denied'].includes(authorization)) throw new Error('unsupported public-use authorization');
     const proposal = this.state.proposals.find((item) => item.id === proposalId);
-    if (!proposal || !proposal.sources.some((source) => source.id === sourceId)) throw new Error('source is not part of this proposal');
+    const source = proposal?.sources.find((item) => item.id === sourceId);
+    if (!proposal || !source) throw new Error('source is not part of this proposal');
+    if (this.isSourceInvalidated(source)) throw new Error('cannot authorize a revoked or deleted source');
     const normalizedAt = iso(updatedAt, 'updatedAt');
     const record = { proposalId, sourceId, authorization, updatedAt: normalizedAt };
     this.mutate(() => {
@@ -212,6 +252,7 @@ export class JsonBlogAssociations {
     const proposal = this.state.proposals.find((item) => item.id === input.proposalId);
     if (!proposal) throw new Error('association proposal does not exist');
     if (proposal.decision !== 'accepted') throw new Error('association must be accepted before drafting');
+    if (!this.areProposalSourcesActive(proposal.id)) throw new Error('association contains revoked or deleted sources');
     const draft: StancePreservingBlogDraft = {
       id: randomUUID(), proposalId: proposal.id, createdAt: iso(input.createdAt, 'createdAt'), audience: input.audience,
       userClaims: normalizeStatements(input.userClaims, 'userClaims'),
@@ -236,6 +277,18 @@ export class JsonBlogAssociations {
 
   listDrafts(proposalId?: string): StancePreservingBlogDraft[] {
     return structuredClone(this.state.drafts.filter((draft) => proposalId === undefined || draft.proposalId === proposalId));
+  }
+
+  /** Drafts safe to reuse in an output; historical drafts remain visible through listDrafts. */
+  listReusableDrafts(proposalId?: string): StancePreservingBlogDraft[] {
+    return structuredClone(this.state.drafts.filter((draft) =>
+      (proposalId === undefined || draft.proposalId === proposalId)
+      && this.areProposalSourcesActive(draft.proposalId),
+    ));
+  }
+
+  private isSourceInvalidated(source: BlogSourceReference): boolean {
+    return (this.state.invalidatedSources ?? []).some((item) => sourceKey(item.source) === sourceKey(source));
   }
 
   private mutate(change: () => void): void {

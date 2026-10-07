@@ -138,3 +138,67 @@ test('explicit grants are source-specific and persist with a public draft', asyn
     await rm(directory, { recursive: true, force: true });
   }
 });
+
+test('revoked or deleted references cannot be proposed, accepted, authorized, or used for new drafts', () => {
+  for (const reason of ['revoked', 'deleted'] as const) {
+    const store = new JsonBlogAssociations();
+    const proposal = propose(store, `before-${reason}`);
+    store.invalidateSource(sources[0]!, reason, timestamp);
+    store.invalidateSource(sources[0]!, reason, timestamp); // idempotent
+
+    assert.equal(store.areProposalSourcesActive(proposal.id), false);
+    assert.throws(() => store.proposeAssociation({
+      initiatedBy: 'user', operationId: `after-${reason}`, actorId: 'owner', createdAt: timestamp,
+      authorizedSpaceIds: ['reading', 'exploration'], sources,
+      reasoning: 'Potential connection.', intendedUse: 'Blog draft.',
+    }), /revoked or deleted source/);
+    assert.throws(() => store.decide(proposal.id, 'accepted', timestamp), /cannot accept/);
+    assert.throws(() => store.setPublicUseAuthorization(proposal.id, 'reading-1', 'authorized', timestamp), /cannot authorize/);
+    assert.equal(store.listProposals().length, 1);
+  }
+});
+
+test('source invalidation prevents already accepted proposals from creating or reusing drafts', () => {
+  const store = new JsonBlogAssociations();
+  const proposal = propose(store);
+  store.decide(proposal.id, 'accepted', timestamp);
+  store.setPublicUseAuthorization(proposal.id, 'reading-1', 'authorized', timestamp);
+  store.setPublicUseAuthorization(proposal.id, 'exploration-1', 'authorized', timestamp);
+  const draft = store.createDraft({
+    proposalId: proposal.id, createdAt: timestamp, audience: 'public',
+    userClaims: [{ text: 'An approved public claim.', sourceIds: ['reading-1'] }],
+  });
+  assert.deepEqual(store.listReusableDrafts(proposal.id), [draft]);
+
+  store.invalidateSource(sources[0]!, 'revoked', timestamp);
+  assert.throws(() => store.createDraft({
+    proposalId: proposal.id, createdAt: timestamp, audience: 'private',
+    userClaims: [{ text: 'A new claim.', sourceIds: ['reading-1'] }],
+  }), /contains revoked or deleted sources/);
+  assert.deepEqual(store.listReusableDrafts(proposal.id), []);
+  // Historical records remain auditable, but are no longer advertised as reusable.
+  assert.deepEqual(store.listDrafts(proposal.id), [draft]);
+});
+
+test('legacy v1 state without invalidation metadata remains readable and upgrades on next write', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-os-blog-legacy-'));
+  const file = join(directory, 'blog.json');
+  try {
+    const legacy = {
+      schemaVersion: 1,
+      proposals: [],
+      publicUseAuthorizations: [],
+      drafts: [],
+    };
+    await import('node:fs/promises').then(({ writeFile }) => writeFile(file, JSON.stringify(legacy), 'utf8'));
+    const store = new JsonBlogAssociations(file);
+    assert.deepEqual(store.listProposals(), []);
+    store.invalidateSource(sources[0]!, 'deleted', timestamp);
+    const persisted = JSON.parse(await readFile(file, 'utf8')) as { invalidatedSources?: unknown[] };
+    assert.equal(persisted.invalidatedSources?.length, 1);
+    const reopened = new JsonBlogAssociations(file);
+    assert.equal(reopened.areProposalSourcesActive('missing'), false);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
