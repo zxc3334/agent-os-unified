@@ -22,6 +22,7 @@ import type { PersonalMemoryStore } from "../core/personal-memory.js";
 import type { MemoryExtractionWorker } from "../core/memory-worker.js";
 import { PERSONAL_SKILLS, type JsonPersonalSkillRegistry } from "../core/personal-skills.js";
 import type { JsonCareerPreparation } from "../core/career-preparation.js";
+import type { CareerReviewSchedulerAdapter } from "../core/review-scheduler.js";
 import type { JsonDailyRecordsReminders } from "../core/daily-records.js";
 import { resolveRelativeDue } from "../core/daily-records.js";
 import type { PersonalReminderScheduler } from "./personal-reminder-scheduler.js";
@@ -45,6 +46,7 @@ export async function handleSessionCommand(options: {
   memoryExtractionWorker?: MemoryExtractionWorker;
   personalSkills?: JsonPersonalSkillRegistry;
   careerPreparation?: JsonCareerPreparation;
+  careerReviewScheduler?: CareerReviewSchedulerAdapter;
   dailyRecords?: JsonDailyRecordsReminders;
   personalReminderScheduler?: PersonalReminderScheduler;
 }): Promise<CommandOutcome> {
@@ -65,6 +67,7 @@ export async function handleSessionCommand(options: {
     memoryExtractionWorker,
     personalSkills,
     careerPreparation,
+    careerReviewScheduler,
     dailyRecords,
     personalReminderScheduler,
   } = options;
@@ -199,9 +202,16 @@ export async function handleSessionCommand(options: {
           `证据：${evidence.length ? evidence.map((item) => `${item.status === "confirmed" ? "✅" : "○"} ${safe(item.claim)} [${item.id}]`).join("；") : "尚未记录"}`,
           `当前简历版本：${resumes ? `${resumes.id}（岗位 ${resumes.roleId}，${resumes.claims.length} 条主张）` : "尚未批准"}`,
           `待复习反馈：${learning.filter((item) => item.reviewStatus === "needs-review").slice(0, 5).map((item) => `${safe(item.weakPoint)} [${item.id}]`).join("；") || "无"}`,
-          "命令：/career role <岗位> | <要求1;要求2>；/career evidence confirmed|unconfirmed <内容>；/career resume <岗位ID> <证据ID,...>；/career approve <版本ID>；/career export <版本ID>；/career feedback <版本ID> <表现> | <薄弱点>；/career review <反馈ID> <0-5>",
+          "命令：/career role <岗位> | <要求1;要求2>；/career evidence confirmed|unconfirmed <内容>；/career resume <岗位ID> <证据ID,...>；/career approve <版本ID>；/career export <版本ID>；/career feedback <版本ID> <表现> | <薄弱点>；/career due 查看待复习项；/career review <反馈ID> <0-5>",
         ];
         await bot.reply(msg.messageId, lines.join("\n"), hasThread);
+      } else if (command.action === "due") {
+        if (!careerReviewScheduler) throw new Error("复习调度暂不可用");
+        const due = (await careerReviewScheduler.listDueReviews()).slice(0, 5);
+        const lines = due.map((item) => `• ${safe(item.weakPoint)} [${item.id}]（到期 ${item.nextReviewAt}；${item.reviewRounds} 轮）`);
+        await bot.reply(msg.messageId, lines.length
+          ? `待复习（最多显示 5 条）：\n${lines.join("\n")}\n完成后用 /career review <ID> <0-5> 记录评分。`
+          : "目前没有到期的求职复习项。", hasThread);
       } else if (command.action === "evidence") {
         const evidence = await careerPreparation.addEvidence({
           claim: command.claim, status: command.status,

@@ -16,6 +16,7 @@ export type SlashCommand =
   | { name: 'career'; action: 'export'; resumeId: string }
   | { name: 'career'; action: 'feedback'; resumeId: string; summary: string; weakPoint: string }
   | { name: 'career'; action: 'review'; learningId: string; score: number }
+  | { name: 'career'; action: 'due' }
   | { name: 'daily'; action: 'list' }
   | { name: 'daily'; action: 'add'; kind: 'daily' | 'reading' | 'exploration'; content: string; authorView?: string; userView?: string }
   | { name: 'daily'; action: 'recap'; from: string; through: string }
@@ -91,6 +92,7 @@ export function parseCommand(text: string): SlashCommand | undefined {
   if (careerMatch) {
     const args = careerMatch[1]?.trim() ?? '';
     if (!args || args === 'status') return { name: 'career', action: 'status' };
+    if (args === 'due') return { name: 'career', action: 'due' };
     const evidence = /^(evidence)\s+(confirmed|unconfirmed)\s+([\s\S]+)$/.exec(args);
     if (evidence?.[3]?.trim()) return { name: 'career', action: 'evidence', status: evidence[2] as 'confirmed' | 'unconfirmed', claim: evidence[3].trim() };
     const role = /^role\s+([\s\S]+)$/.exec(args);

@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { handleSessionCommand } from '../../src/app/command-handler.js';
 import { JsonCareerPreparation } from '../../src/core/career-preparation.js';
 import { parseCommand } from '../../src/core/command-parser.js';
+import { CareerReviewSchedulerAdapter } from '../../src/core/review-scheduler.js';
 
 async function setup() {
   const directory = await mkdtemp(join(tmpdir(), 'agent-os-career-command-'));
@@ -88,6 +89,35 @@ test('career records are denied in group chats and for non-owner actors', async 
       command: parseCommand('/career status'),
     });
     assert.match(ctx.replies.at(-1)!, /仅限所有者在私聊中使用/);
+  } finally {
+    await rm(ctx.directory, { recursive: true, force: true });
+  }
+});
+
+test('owner can list a bounded set of due career reviews in private chat', async () => {
+  const ctx = await setup();
+  try {
+    const role = await ctx.careerPreparation.saveRoleRequirements({
+      title: 'Backend Intern', requirements: [], source: { kind: 'user-confirmation', id: 'role-source' },
+    });
+    const evidence = await ctx.careerPreparation.addEvidence({
+      claim: 'Built a durable queue', status: 'confirmed', sources: [{ kind: 'user-confirmation', id: 'evidence-source' }],
+    });
+    const resume = await ctx.careerPreparation.proposeResumeVersion({ roleId: role.id, evidenceIds: [evidence.id] });
+    for (let index = 0; index < 7; index += 1) {
+      await ctx.careerPreparation.recordMockInterview({
+        resumeVersionId: resume.id, recordedAt: '2026-10-06T10:00:00.000Z',
+        feedback: [{ summary: `Feedback ${index}`, weakPoint: `Weak point ${index}`, source: { kind: 'mock-interview', id: `interview-${index}` } }],
+      });
+    }
+    const careerReviewScheduler = new CareerReviewSchedulerAdapter(ctx.careerPreparation, () => new Date('2026-10-07T12:00:00.000Z'));
+    assert.deepEqual(parseCommand('/career due'), { name: 'career', action: 'due' });
+    await handleSessionCommand({ ...ctx.options, careerReviewScheduler, command: parseCommand('/career due') });
+    const reply = ctx.replies.at(-1)!;
+    assert.match(reply, /最多显示 5 条/);
+    assert.match(reply, /Weak point 0/);
+    assert.match(reply, /Weak point 4/);
+    assert.doesNotMatch(reply, /Weak point 5/);
   } finally {
     await rm(ctx.directory, { recursive: true, force: true });
   }

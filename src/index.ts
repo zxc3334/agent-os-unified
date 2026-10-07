@@ -31,6 +31,7 @@ import { PersonalTaskMemoryProvider } from './app/personal-task-memory.js';
 import { PersonalMemoryToolBridge } from './app/personal-memory-bridge.js';
 import { JsonPersonalSkillRegistry } from './core/personal-skills.js';
 import { JsonCareerPreparation } from './core/career-preparation.js';
+import { CareerReviewSchedulerAdapter } from './core/review-scheduler.js';
 import { JsonDailyRecordsReminders } from './core/daily-records.js';
 import { PersonalReminderScheduler } from './app/personal-reminder-scheduler.js';
 import { SessionManager } from './core/session-manager.js';
@@ -152,6 +153,7 @@ const personalMemoryStore = configuredOwnerOpenId
   : undefined;
 const personalSkills = new JsonPersonalSkillRegistry(join(privateDataRoot, 'personal-skills.json'));
 const careerPreparation = new JsonCareerPreparation(join(privateDataRoot, 'career-preparation.json'));
+const careerReviewScheduler = new CareerReviewSchedulerAdapter(careerPreparation);
 const dailyRecords = new JsonDailyRecordsReminders(join(privateDataRoot, 'daily-records.json'));
 const personalReminderScheduler = new PersonalReminderScheduler({
   store: dailyRecords,
@@ -438,6 +440,7 @@ async function startConfiguredBot(
         memoryExtractionWorker,
         personalSkills,
         careerPreparation,
+        careerReviewScheduler,
         dailyRecords,
         personalReminderScheduler,
       });
