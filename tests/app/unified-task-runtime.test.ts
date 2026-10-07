@@ -252,4 +252,3 @@ test('versioned synthetic replay cases assert deterministic adapter and permissi
   assert.equal(results.length, PERSONAL_AGENT_REPLAY_FIXTURES.length);
   assert.ok(results.every((result) => result.passed && result.fixtureVersion === 1));
 });
-});
