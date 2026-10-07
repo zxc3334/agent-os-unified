@@ -20,6 +20,7 @@ import type { AppRuntime } from "./runtime.js";
 import type { Scheduler } from "./scheduler.js";
 import type { PersonalMemoryStore } from "../core/personal-memory.js";
 import type { MemoryExtractionWorker } from "../core/memory-worker.js";
+import { PERSONAL_SKILLS, type JsonPersonalSkillRegistry } from "../core/personal-skills.js";
 
 export type CommandOutcome = "handled" | "continue";
 
@@ -38,6 +39,7 @@ export async function handleSessionCommand(options: {
   personalMemoryStore?: PersonalMemoryStore;
   trustedOwnerOpenId?: string;
   memoryExtractionWorker?: MemoryExtractionWorker;
+  personalSkills?: JsonPersonalSkillRegistry;
 }): Promise<CommandOutcome> {
   const {
     runtime,
@@ -54,6 +56,7 @@ export async function handleSessionCommand(options: {
     personalMemoryStore,
     trustedOwnerOpenId,
     memoryExtractionWorker,
+    personalSkills,
   } = options;
 
   if (!isNew && cliRequest && cliRequest.cliId !== session.cliId) {
@@ -62,6 +65,40 @@ export async function handleSessionCommand(options: {
       `当前话题已经在使用 ${cliAdapter.displayName}。如需切换执行引擎，请新开一个话题。`,
       hasThread,
     );
+    return "handled";
+  }
+
+  if (command?.name === "skills") {
+    if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId) {
+      await bot.reply(msg.messageId, "个人技能设置仅限配置的所有者使用。", hasThread);
+      return "handled";
+    }
+    if (!personalSkills) {
+      await bot.reply(msg.messageId, "个人技能设置暂不可用。", hasThread);
+      return "handled";
+    }
+    try {
+      if (command.action === "list") {
+        const skills = await personalSkills.list();
+        await bot.reply(msg.messageId, skills.map((skill) =>
+          `${skill.enabled ? "✅ 已启用" : "○ 未启用"} ${skill.id} — ${skill.name}：${skill.description}`,
+        ).join("\n") + "\n用法：/skills enable <id> 或 /skills disable <id>", hasThread);
+      } else {
+        const skill = PERSONAL_SKILLS.find((item) => item.id === command.skillId);
+        if (!skill) {
+          await bot.reply(msg.messageId, "没有这个内置技能。可先用 /skills 查看可用列表。", hasThread);
+        } else {
+          const updated = command.action === "enable"
+            ? await personalSkills.enable(skill.id)
+            : await personalSkills.disable(skill.id);
+          await bot.reply(msg.messageId, updated
+            ? `已${command.action === "enable" ? "启用" : "停用"}「${skill.name}」。`
+            : "技能设置未能保存。", hasThread);
+        }
+      }
+    } catch (error) {
+      await bot.reply(msg.messageId, `技能设置失败：${(error as Error).message}`, hasThread);
+    }
     return "handled";
   }
 
@@ -165,6 +202,7 @@ export async function handleSessionCommand(options: {
         "/topics 扫描有哪些素材够写一篇博客了",
         "/memory [review|recent] [页码] 查看待确认或最近记忆（每页最多 5 条）",
         "/memory extract 从当前项目待处理对话中恢复并执行学习记忆提取",
+        "/skills 查看个人能力包；/skills enable|disable <id> 管理能力包",
         "/memory confirm <id>、/memory correct <id> <内容>、/memory reject <id>、/memory forget <id>",
         "/schedule pause <id> 暂停定时任务",
         "/schedule resume <id> 恢复定时任务",

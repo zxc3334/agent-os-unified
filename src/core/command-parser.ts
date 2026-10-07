@@ -7,6 +7,7 @@ export type SlashCommand =
   | { name: 'schedules' }
   | { name: 'topics' }
   | { name: 'schedule'; request?: string }
+  | { name: 'skills'; action: 'list' | 'enable' | 'disable'; skillId?: string }
   | { name: 'memory'; action: 'review' | 'recent'; page: number }
   | { name: 'memory'; action: 'extract' }
   | { name: 'memory'; action: 'confirm' | 'reject' | 'forget'; entryId: string }
@@ -17,6 +18,7 @@ const COMPACT_RE = /^(?:@.+?\s+)?\/compact(?:\s+([\s\S]+?))?\s*$/;
 const SCHEDULE_RE = /^(?:@.+?\s+)?\/schedule(?:\s+([\s\S]+?))?\s*$/;
 const SCHEDULES_RE = /^(?:@.+?\s+)?\/schedules\s*$/;
 const TOPICS_RE = /^(?:@.+?\s+)?\/topics\s*$/;
+const SKILLS_RE = /^(?:@.+?\s+)?\/skills(?:\s+([\s\S]+?))?\s*$/;
 const MEMORY_RE = /^(?:@.+?\s+)?\/memory(?:\s+([\s\S]+?))?\s*$/;
 const MEMORY_ID_RE = /^[a-zA-Z0-9_-]{1,100}$/;
 const CLI_REQUEST_RE = /^(?:@.+?\s+)?\/(agy|pi|claude|codex)(?:\s+([\s\S]*))?$/;
@@ -25,6 +27,15 @@ export function parseCommand(text: string): SlashCommand | undefined {
   const value = text.trim();
   if (SCHEDULES_RE.test(value)) return { name: 'schedules' };
   if (TOPICS_RE.test(value)) return { name: 'topics' };
+  const skillsMatch = SKILLS_RE.exec(value);
+  if (skillsMatch) {
+    const args = skillsMatch[1]?.trim().split(/\s+/, 3) ?? [];
+    if (!args.length || args[0] === 'list') return args.length <= 1 ? { name: 'skills', action: 'list' } : undefined;
+    if ((args[0] === 'enable' || args[0] === 'disable') && args.length === 2 && /^[a-z0-9-]{1,64}$/.test(args[1] ?? '')) {
+      return { name: 'skills', action: args[0], skillId: args[1] };
+    }
+    return undefined;
+  }
   const memoryMatch = MEMORY_RE.exec(value);
   if (memoryMatch) {
     const args = memoryMatch[1]?.trim().split(/\s+/, 3) ?? [];

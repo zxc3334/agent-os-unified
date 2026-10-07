@@ -29,6 +29,7 @@ import { parseCliRequest, parseCommand } from './core/command-parser.js';
 import { PersonalMemoryStore } from './core/personal-memory.js';
 import { preparePersonalMemoryContext } from './core/personal-memory-context.js';
 import { PersonalMemoryToolBridge } from './app/personal-memory-bridge.js';
+import { JsonPersonalSkillRegistry } from './core/personal-skills.js';
 import { SessionManager } from './core/session-manager.js';
 import { JsonSessionStore } from './core/session-store.js';
 import { TaskProgressTracker } from './core/task-progress.js';
@@ -146,6 +147,7 @@ const personalMemoryStore = configuredOwnerOpenId
       ownerId: configuredOwnerOpenId,
     })
   : undefined;
+const personalSkills = new JsonPersonalSkillRegistry(join(privateDataRoot, 'personal-skills.json'));
 const personalMemoryBridge = personalMemoryStore
   ? new PersonalMemoryToolBridge(personalMemoryStore)
   : undefined;
@@ -379,12 +381,16 @@ async function startConfiguredBot(
             return '';
           })
         : '';
+      const personalSkillContext = await personalSkills.promptFor(taskText).catch((error) => {
+        console.warn('[个人技能] 读取失败:', (error as Error).message);
+        return '';
+      });
       const prompt = buildBotPrompt(
         config,
         taskText,
         teamRegistry.contextFor(config.id),
         agentOsConfig.defaultProductDeliveryMode,
-        [personalMemoryContext, memoryContext].filter(Boolean).join('\n\n'),
+        [personalSkillContext, personalMemoryContext, memoryContext].filter(Boolean).join('\n\n'),
       );
       const taskCardTitle = isCompacting
         ? '整理上下文'
@@ -416,6 +422,7 @@ async function startConfiguredBot(
         personalMemoryStore,
         trustedOwnerOpenId: configuredOwnerOpenId,
         memoryExtractionWorker,
+        personalSkills,
       });
       if (commandOutcome === 'handled') return;
 

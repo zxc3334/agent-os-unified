@@ -37,6 +37,9 @@ test('memory command grammar leaves existing command parsing compatible', () => 
   assert.deepEqual(parseCommand('/memory'), { name: 'memory', action: 'review', page: 1 });
   assert.deepEqual(parseCommand('/memory recent 2'), { name: 'memory', action: 'recent', page: 2 });
   assert.deepEqual(parseCommand('/memory extract'), { name: 'memory', action: 'extract' });
+  assert.deepEqual(parseCommand('/skills'), { name: 'skills', action: 'list' });
+  assert.deepEqual(parseCommand('/skills enable career-interview'), { name: 'skills', action: 'enable', skillId: 'career-interview' });
+  assert.equal(parseCommand('/skills enable ../../escape'), undefined);
   assert.deepEqual(parseCommand('/memory correct abc-1 corrected text'), {
     name: 'memory', action: 'correct', entryId: 'abc-1', content: 'corrected text',
   });

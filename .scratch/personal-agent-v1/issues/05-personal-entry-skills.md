@@ -20,6 +20,7 @@
 - The primary existing Feishu message path now appends a bounded personal-memory snapshot for direct messages from the configured owner only. Query scope is passed as trusted authorized space IDs, and relevance filtering occurs inside that scope; group messages and non-owner actors receive no private personal-memory snapshot.
 - Added temporary-storage tests for owner/DM gating and space filtering.
 - Verification: `pnpm test` (27/27) and `pnpm build` pass.
+- Added owner-only `/skills` commands and four small built-in packs (career/interview, reading, research/blog, daily records); activation is persisted and requires explicit enablement. Selection is keyword-based and adds process guidance only, never tools or permissions.
 - Added an authorized on-demand `search_personal_memory` MCP tool. It uses the invocation token and host-supplied authorized space IDs; model arguments cannot choose owner, source, or access scope. Search results include space, confidence, and source IDs; no-hit is distinct from bridge failure.
-- Verification: `pnpm test` (37 tests) and `pnpm build` pass.
-- Remaining: add explicit affair/space selection and enabled skill packs, and share memory-context preparation with scheduled/continuation adapters. The current automatic snapshot and on-demand search are wired only for the owner’s direct Feishu message path.
+- Verification: `pnpm test` (38 tests) and `pnpm build` pass.
+- Remaining: add explicit affair/space selection and share memory-context preparation with scheduled/continuation adapters. The current automatic snapshot and on-demand search are wired only for the owner’s direct Feishu message path.
