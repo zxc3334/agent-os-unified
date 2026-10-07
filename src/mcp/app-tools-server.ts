@@ -10,6 +10,7 @@ import { SaveMemorySchema } from '../core/save-memory.js';
 import { RememberPersonalMemorySchema, SearchPersonalMemorySchema } from '../core/personal-memory-tool.js';
 import { CaptureDailyRecordSchema, CreatePersonalReminderSchema, SearchDailyRecordsSchema } from '../core/daily-record-tool.js';
 import { CreateDailyReminderToolSchema } from '../core/daily-reminder-tool.js';
+import { SaveCareerInterviewFeedbackSchema } from '../core/career-feedback-tool.js';
 import {
   CLARIFICATION_TOOL_NAME,
   PRODUCT_SPEC_TOOL_NAME,
@@ -23,6 +24,7 @@ import {
   SEARCH_DAILY_RECORDS_TOOL_NAME,
   CREATE_PERSONAL_REMINDER_TOOL_NAME,
   CREATE_DAILY_REMINDER_TOOL_NAME,
+  SAVE_CAREER_INTERVIEW_FEEDBACK_TOOL_NAME,
 } from '../cli/app-tools.js';
 
 const server = new McpServer({
@@ -357,6 +359,38 @@ server.registerTool(
       text: `记忆提交已受理（project=${String((input as { project?: unknown }).project ?? '')}），Agent OS 将负责落盘。`,
     }],
   }),
+);
+
+
+server.registerTool(
+  SAVE_CAREER_INTERVIEW_FEEDBACK_TOOL_NAME,
+  {
+    title: '保存模拟面试复习反馈',
+    description: [
+      '仅当用户明确要求保存模拟面试反馈或明确同意保存后调用；未同意时先询问。',
+      'summary 概括本轮表现，weakPoint 写一个真实暴露的薄弱点，locator 可写对应问题/轮次。不要编造内容。',
+      '此工具只创建待复习 practice-feedback 学习记录，绝不会创建或确认简历证据。仅在所有者私聊、且已启用求职面试能力包时可用。',
+      '只有返回 status=saved 才表示已持久保存；返回 reviewStatus 和 learningRecordId 后如实告知用户。',
+    ].join(''),
+    inputSchema: SaveCareerInterviewFeedbackSchema,
+  },
+  async (input) => {
+    const token = process.env.AGENT_OS_CAREER_FEEDBACK_TOKEN;
+    const port = Number(process.env.AGENT_OS_CAREER_FEEDBACK_API_PORT);
+    if (!token || !Number.isInteger(port) || port < 1 || port > 65_535) {
+      return { content: [{ type: 'text', text: JSON.stringify({ status: 'unauthorized', message: '当前执行没有所有者求职反馈写入授权；未保存。' }) }], isError: true };
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/career/interview-feedback`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-career-feedback-token': token },
+        body: JSON.stringify(input),
+      });
+      const result = await response.json().catch(() => ({ status: 'error', message: '求职反馈服务返回了无法读取的结果；未确认保存。' }));
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], ...(response.ok ? {} : { isError: true }) };
+    } catch (error) {
+      return { content: [{ type: 'text', text: JSON.stringify({ status: 'error', message: `求职反馈服务不可用，未确认保存：${(error as Error).message}` }) }], isError: true };
+    }
+  },
 );
 
 await server.connect(new StdioServerTransport());

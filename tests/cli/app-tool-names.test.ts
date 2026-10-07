@@ -7,5 +7,6 @@ test('daily record and reminder MCP tool aliases normalize through engine adapte
   assert.equal(normalizeAppToolName('mcp__agent_os__search_daily_records'), 'search_daily_records');
   assert.equal(normalizeAppToolName('agent_os_create_personal_reminder'), 'create_personal_reminder');
   assert.equal(normalizeAppToolName('mcp__agent_os__create_daily_reminder'), 'create_daily_reminder');
+  assert.equal(normalizeAppToolName('mcp__agent_os__save_career_interview_feedback'), 'save_career_interview_feedback');
   assert.equal(normalizeAppToolName('untrusted_send_message'), undefined);
 });

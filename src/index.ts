@@ -31,8 +31,10 @@ import { JsonDailyRecordsReminders } from './core/daily-records.js';
 import { PersonalTaskMemoryProvider } from './app/personal-task-memory.js';
 import { PersonalMemoryToolBridge } from './app/personal-memory-bridge.js';
 import { DailyReminderToolBridge } from './app/daily-reminder-tool-bridge.js';
+import { CareerFeedbackToolBridge } from './app/career-feedback-tool-bridge.js';
 import { JsonPersonalSkillRegistry } from './core/personal-skills.js';
 import { JsonCareerPreparation } from './core/career-preparation.js';
+import { explicitlyRequestsCareerFeedbackSave } from './core/career-feedback-tool.js';
 import { JsonBlogAssociations } from './core/blog-associations.js';
 import { BlogEntryService } from './app/blog-entry-service.js';
 import { dailyRecordSearchProvider, personalMemorySearchProvider, textMaterialSearchProvider } from './core/blog-source-retriever.js';
@@ -162,6 +164,10 @@ const textMaterials = configuredOwnerOpenId
   ? new JsonTextMaterialLibrary(join(privateDataRoot, 'text-materials.json'), configuredOwnerOpenId)
   : undefined;
 const careerReviewScheduler = new CareerReviewSchedulerAdapter(careerPreparation);
+const careerFeedbackBridge = configuredOwnerOpenId ? new CareerFeedbackToolBridge(careerPreparation) : undefined;
+const careerFeedbackApiPort = careerFeedbackBridge
+  ? await careerFeedbackBridge.start(Number(process.env.AGENT_OS_CAREER_FEEDBACK_API_PORT ?? 0))
+  : undefined;
 const dailyRecords = new JsonDailyRecordsReminders(join(privateDataRoot, 'daily-records.json'));
 const blogAssociations = new JsonBlogAssociations(join(privateDataRoot, 'blog-associations.json'));
 const blogEntryService = personalMemoryStore
@@ -616,6 +622,18 @@ async function startConfiguredBot(
       const progressHeartbeat = setInterval(renderProgress, 1_000);
       progressHeartbeat.unref();
 
+      const careerFeedbackInvocation = careerFeedbackBridge && careerFeedbackApiPort !== undefined
+        && msg.chatType === 'p2p'
+        && msg.senderOpenId === configuredOwnerOpenId
+        && await personalSkills.isSelectedFor('career-interview', taskText)
+        && explicitlyRequestsCareerFeedbackSave(taskText)
+        ? await careerPreparation.getActiveResumeVersion().then((resume) => resume
+            ? careerFeedbackBridge.issue({
+                actorId: msg.senderOpenId, ownerId: configuredOwnerOpenId!, sourceId: msg.messageId,
+                receivedAt: msg.receivedAt, resumeVersionId: resume.id,
+              })
+            : undefined)
+        : undefined;
       const reminderInvocation = dailyReminderBridge && configuredOwnerOpenId
         && msg.chatType === 'p2p'
         && msg.senderOpenId === configuredOwnerOpenId
@@ -647,6 +665,10 @@ async function startConfiguredBot(
         // agy 没有项目级 MCP 配置，只能走全局垫片；垫片靠它找到本次运行的安装目录。
         AGENT_OS_HOME: resolve(import.meta.dirname, '..'),
       };
+      if (careerFeedbackInvocation && careerFeedbackApiPort !== undefined) {
+        cliEnv.AGENT_OS_CAREER_FEEDBACK_API_PORT = String(careerFeedbackApiPort);
+        cliEnv.AGENT_OS_CAREER_FEEDBACK_TOKEN = careerFeedbackInvocation.token;
+      }
       if (reminderInvocation && dailyReminderApiPort !== undefined) {
         cliEnv.AGENT_OS_DAILY_REMINDER_API_PORT = String(dailyReminderApiPort);
         cliEnv.AGENT_OS_DAILY_REMINDER_TOKEN = reminderInvocation.token;
@@ -1181,6 +1203,7 @@ async function startConfiguredBot(
           }
           memoryInvocation?.release();
           reminderInvocation?.release();
+          careerFeedbackInvocation?.release();
         })
         .catch((error) => {
           console.error('[任务] 回传或收尾失败:', (error as Error).message);

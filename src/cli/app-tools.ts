@@ -12,6 +12,7 @@ export const CAPTURE_DAILY_RECORD_TOOL_NAME = 'capture_daily_record';
 export const SEARCH_DAILY_RECORDS_TOOL_NAME = 'search_daily_records';
 export const CREATE_PERSONAL_REMINDER_TOOL_NAME = 'create_personal_reminder';
 export const CREATE_DAILY_REMINDER_TOOL_NAME = 'create_daily_reminder';
+export const SAVE_CAREER_INTERVIEW_FEEDBACK_TOOL_NAME = 'save_career_interview_feedback';
 export const CLAUDE_CLARIFICATION_TOOL_NAME =
   `mcp__agent_os__${CLARIFICATION_TOOL_NAME}`;
 export const CLAUDE_PRODUCT_SPEC_TOOL_NAME =

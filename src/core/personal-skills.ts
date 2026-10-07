@@ -11,7 +11,7 @@ export const PERSONAL_SKILLS = [
     guidance: [
       '先围绕用户实际简历主张和项目记录提问，采用一次一问、逐层追问的面试方式。',
       '区分已确认事实、资料支持、用户评价和待核实推断；缺乏证据时追问或标注缺口，不补造贡献、指标或责任范围。',
-      '结束时简要列出答得好的部分、具体薄弱点和建议复习问题；只有真实学习考点才调用既有 save_memory。',
+      '结束时简要列出答得好的部分、具体薄弱点和建议复习问题。普通知识考点可调用 save_memory；面试表现与薄弱点只能在用户明确要求保存或明确同意后调用 save_career_interview_feedback。保存时只传真实对话中出现的反馈；它会成为待复习的 practice-feedback 学习记录，绝不是已确认项目事实或简历证据。未获同意时先询问，不要调用保存工具。',
     ],
   },
   {
@@ -63,6 +63,17 @@ export class JsonPersonalSkillRegistry {
   async list(): Promise<Array<(typeof PERSONAL_SKILLS)[number] & { enabled: boolean }>> {
     const state = await this.read();
     return PERSONAL_SKILLS.map((skill) => ({ ...skill, enabled: state.enabled.includes(skill.id) }));
+  }
+
+  async isEnabled(id: PersonalSkillId): Promise<boolean> {
+    return (await this.read()).enabled.includes(id);
+  }
+
+  async isSelectedFor(id: PersonalSkillId, input: string): Promise<boolean> {
+    const skill = PERSONAL_SKILLS.find((candidate) => candidate.id === id);
+    if (!skill || !(await this.isEnabled(id))) return false;
+    const normalized = input.normalize('NFKC').toLocaleLowerCase();
+    return skill.triggers.some((trigger) => normalized.includes(trigger.toLocaleLowerCase()));
   }
 
   async enable(id: string): Promise<boolean> {

@@ -51,6 +51,7 @@ const APP_TOOL_LABELS: Record<string, string> = {
   capture_daily_record: '记录日常',
   search_daily_records: '回顾日常记录',
   create_personal_reminder: '安排私人提醒',
+  save_career_interview_feedback: '保存面试复习反馈',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
