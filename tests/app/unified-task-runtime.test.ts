@@ -9,6 +9,7 @@ import {
   conversationAffairId,
   workflowAffairId,
   type UnifiedTask,
+  type UnifiedTaskStore,
 } from '../../src/app/unified-task-runtime.js';
 import { runPersonalAgentReplaySuite } from '../replay/evaluator.js';
 import {
@@ -217,6 +218,75 @@ test('private-safe trace exposes lifecycle and opaque source/artifact identifier
     }
     assert.equal(traceJson.includes('message-opaque-42'), true);
     assert.equal(traceJson.includes('artifact-resume-v2'), true);
+  });
+});
+
+test('content-free trace history survives restart and is exposed by task lookup and list', async () => {
+  await withStore(async (filePath) => {
+    const runtime = new UnifiedTaskRuntime({
+      store: new JsonUnifiedTaskStore(filePath),
+      id: () => 'trace-durable-1',
+      now: () => fixedTime,
+      memoryContext: { async prepare() { return { privateMemoryText: 'PRIVATE-MEMORY-MARKER' }; } },
+      executor: {
+        async execute({ reportProgress }) {
+          await reportProgress('PRIVATE-PROGRESS-MARKER');
+          return {
+            outcome: 'succeeded', result: { text: 'PRIVATE-RESULT-MARKER' }, artifacts: [],
+          };
+        },
+      },
+    });
+    const completed = await runtime.run({
+      ...request(), input: { text: 'PRIVATE-INPUT-MARKER' },
+      trigger: { source: 'message', sourceId: 'message-durable-1', occurredAt: fixedTime },
+    });
+    const expectedStages = ['queued', 'context_prepared', 'execution_progress', 'completed'];
+    assert.deepEqual(completed.traceHistory.map(({ stage }) => stage), expectedStages);
+    for (const value of ['PRIVATE-INPUT-MARKER', 'PRIVATE-MEMORY-MARKER', 'PRIVATE-PROGRESS-MARKER', 'PRIVATE-RESULT-MARKER']) {
+      assert.equal(JSON.stringify(completed.traceHistory).includes(value), false);
+    }
+
+    const reopenedRuntime = new UnifiedTaskRuntime({
+      store: new JsonUnifiedTaskStore(filePath),
+      memoryContext: { async prepare() { return null; } },
+      executor: { async execute() { throw new Error('lookup must not execute'); } },
+    });
+    assert.deepEqual((await reopenedRuntime.get('trace-durable-1'))?.traceHistory, completed.traceHistory);
+    const listed = await reopenedRuntime.list('career-search');
+    assert.deepEqual(listed.map(({ id }) => id), ['trace-durable-1']);
+    assert.deepEqual(listed[0]?.traceHistory, completed.traceHistory);
+    assert.deepEqual(await reopenedRuntime.list('other-affair'), []);
+  });
+});
+
+test('trace persistence failure never changes the authoritative task outcome', async () => {
+  await withStore(async (filePath) => {
+    const base = new JsonUnifiedTaskStore(filePath);
+    let saveCalls = 0;
+    const store: UnifiedTaskStore = {
+      get: (id) => base.get(id),
+      list: (affairId) => base.list(affairId),
+      async save(task) {
+        saveCalls += 1;
+        // The first save is the authoritative queued task. Fail the next
+        // save, which is the best-effort queued trace append.
+        if (saveCalls === 2) throw new Error('trace disk failure');
+        await base.save(task);
+      },
+    };
+    const runtime = new UnifiedTaskRuntime({
+      store, id: () => 'trace-write-failure',
+      memoryContext: { async prepare() { return null; } },
+      executor: { async execute() { return { outcome: 'succeeded', result: 'authoritative result', artifacts: [] }; } },
+    });
+    const task = await runtime.run(request());
+    assert.equal(task.status, 'succeeded');
+    assert.equal(task.result, 'authoritative result');
+    const persisted = await base.get('trace-write-failure');
+    assert.equal(persisted?.status, 'succeeded');
+    assert.ok((persisted?.traceHistory.length ?? 0) > 0);
+    assert.equal(saveCalls > 2, true);
   });
 });
 

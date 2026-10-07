@@ -100,6 +100,8 @@ export interface UnifiedTask {
   progress?: string;
   result?: unknown;
   artifacts: TaskArtifact[];
+  /** Content-free lifecycle history; legacy records are loaded with an empty history. */
+  traceHistory: UnifiedTaskTraceEvent[];
   error?: string;
 }
 
@@ -205,13 +207,14 @@ export class UnifiedTaskRuntime<Context = unknown> {
       createdAt: timestamp,
       updatedAt: timestamp,
       artifacts: [],
+      traceHistory: [],
     };
 
     await this.persist(task, observe);
-    await this.trace(task, 'queued');
+    task = await this.trace(task, 'queued');
     if (request.signal.aborted) {
       task = await this.finish(task, 'cancelled', observe);
-      await this.trace(task, 'cancelled');
+      task = await this.trace(task, 'cancelled');
       return clone(task);
     }
 
@@ -230,11 +233,11 @@ export class UnifiedTaskRuntime<Context = unknown> {
         ...(request.memoryQuery === undefined ? {} : { query: request.memoryQuery }),
         signal: request.signal,
       });
-      await this.trace(task, 'context_prepared');
+      task = await this.trace(task, 'context_prepared');
       phase = 'execution';
       if (request.signal.aborted) {
         task = await this.finish(task, 'cancelled', observe);
-        await this.trace(task, 'cancelled');
+        task = await this.trace(task, 'cancelled');
         return clone(task);
       }
 
@@ -246,7 +249,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
           if (task.status !== 'running' || request.signal.aborted) return;
           task = { ...task, progress, updatedAt: this.now() };
           await this.persist(task, observe);
-          await this.trace(task, 'execution_progress');
+          task = await this.trace(task, 'execution_progress');
         },
       });
       assertExecution(execution);
@@ -261,7 +264,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
           ? 'partially_succeeded'
           : 'succeeded';
       task = await this.finish(task, status, observe);
-      await this.trace(task, status === 'cancelled' ? 'cancelled' : 'completed');
+      task = await this.trace(task, status === 'cancelled' ? 'cancelled' : 'completed');
       return clone(task);
     } catch (error) {
       const cancelled = request.signal.aborted || isAbortError(error);
@@ -269,11 +272,11 @@ export class UnifiedTaskRuntime<Context = unknown> {
         ...task,
         ...(cancelled ? {} : { error: errorMessage(error) }),
       };
-      if (!cancelled && phase === 'context') await this.trace(task, 'context_unavailable');
+      if (!cancelled && phase === 'context') task = await this.trace(task, 'context_unavailable');
       task = await this.finish(task, cancelled ? 'cancelled' : 'failed', observe);
-      if (cancelled) await this.trace(task, 'cancelled');
+      if (cancelled) task = await this.trace(task, 'cancelled');
       else {
-        await this.trace(task, 'failed', [], phase === 'context'
+        task = await this.trace(task, 'failed', [], phase === 'context'
           ? 'memory_context_unavailable'
           : 'execution_failed');
       }
@@ -321,8 +324,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
     stage: UnifiedTaskTraceStage,
     artifactIds: readonly string[] = task.artifacts.map(({ id }) => id),
     failureCode?: UnifiedTaskTraceEvent['failureCode'],
-  ): Promise<void> {
-    if (!this.options.trace) return;
+  ): Promise<UnifiedTask> {
     const taskId = safeIdentifier(task.id);
     const sourceId = task.trigger.sourceId === undefined
       ? undefined
@@ -340,11 +342,22 @@ export class UnifiedTaskRuntime<Context = unknown> {
       }),
       ...(failureCode === undefined ? {} : { failureCode }),
     };
+    const traced = { ...task, traceHistory: [...task.traceHistory, event] };
     try {
-      await this.options.trace(clone(event));
+      // The content-free event shares the durable task record. Failure is
+      // diagnostic-only and must not replace the authoritative task outcome.
+      await this.options.store.save(clone(traced));
     } catch {
-      // Diagnostics are best effort; task state remains authoritative.
+      // Trace durability is best effort; task state remains authoritative.
     }
+    if (this.options.trace) {
+      try {
+        await this.options.trace(clone(event));
+      } catch {
+        // External diagnostics are best effort as well.
+      }
+    }
+    return traced;
   }
 }
 
@@ -449,7 +462,7 @@ function parseTask(value: unknown): UnifiedTask {
   ) {
     throw new Error('任务文件包含无效记录');
   }
-  return clone(task);
+  return clone({ ...task, traceHistory: Array.isArray(task.traceHistory) ? task.traceHistory : [] });
 }
 
 function clone<T>(value: T): T {
