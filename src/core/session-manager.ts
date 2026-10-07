@@ -208,7 +208,7 @@ export class SessionManager {
       affairId,
       memorySpaceIds: [...new Set(memorySpaceIds)],
       // Native CLI history belongs to this thread + engine, never to the selected affair.
-      cliSessionId: !current.affairId || current.affairId === affairId ? current.cliSessionId : undefined,
+      cliSessionId: current.affairId === affairId ? current.cliSessionId : undefined,
       updatedAt: this.now().toISOString(),
     };
     const key = sessionKey(updated.botId, updated.chatId, updated.threadId);

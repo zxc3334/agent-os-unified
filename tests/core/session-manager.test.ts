@@ -44,3 +44,28 @@ test('engine changes are rejected while the matter is actively executing', async
     /不能切换执行引擎/,
   );
 });
+
+
+test('selecting an affair from a legacy session with no affair ID clears its native history', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-os-session-migration-'));
+  try {
+    const store = new JsonSessionStore(join(directory, 'sessions.json'));
+    const sessions = await SessionManager.open({ store });
+    let { session } = await sessions.resolve(address, 'agy', 'assistant', '/workspace');
+    session = await sessions.transition(session.id, 'idle');
+    session = await sessions.setCliSessionId(session.id, 'legacy-native-history');
+    assert.equal(session.affairId, undefined);
+
+    const selected = await sessions.selectAffair(session.id, 'selected-matter', ['job-search']);
+    assert.equal(selected.affairId, 'selected-matter');
+    assert.deepEqual(selected.memorySpaceIds, ['job-search']);
+    assert.equal(selected.cliSessionId, undefined);
+
+    const reopened = await SessionManager.open({ store });
+    const restored = await reopened.resolve(address, 'agy', 'assistant', '/workspace');
+    assert.equal(restored.session.affairId, 'selected-matter');
+    assert.equal(restored.session.cliSessionId, undefined);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
