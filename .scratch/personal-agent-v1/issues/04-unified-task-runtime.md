@@ -60,3 +60,11 @@
 - Added temporary-store tests verifying success result/session persistence across reopen and durable failed status for an unsuccessful retry.
 - Verification: `pnpm test` (129/129), `pnpm build`, `git diff --check`.
 - Remaining: cross-thread matter selection/continuation, concise authorized affair-summary carryover, live Feishu end-to-end verification for collaboration and continuations. Ticket remains in progress.
+
+
+### Cross-thread matter continuation update
+
+- Added owner-private `/affair list|select|summary` commands. Selection requires a recent list receipt bound to the same owner, chat, and thread; guessed or cross-chat IDs are rejected. It carries only the selected matter's sanitized summary and still-valid explicit memory-space grants.
+- Selecting another matter clears the thread's native CLI session so the previous matter's history cannot leak into the new scope; legacy sessions without an affair ID receive the same isolation. A matter active in another thread cannot be selected.
+- Tests cover continuation after restart, summary/scope carryover, access denial, active-run denial, and native-session isolation. Current full branch verification: `pnpm test` (151/151), `pnpm build`, `git diff --check`.
+- Remaining: live Feishu validation of cross-thread selection, collaboration and continuation paths; ticket stays in progress.

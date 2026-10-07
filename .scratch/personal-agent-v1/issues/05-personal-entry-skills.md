@@ -51,3 +51,10 @@
 - Tests verify tool arguments cannot inject a grant, trusted matter scope is persisted and survives store reopen, and legacy records remain ungranted.
 - Verification: `pnpm test` (133/133), `pnpm build`, `git diff --check`.
 - Remaining: cross-thread affair selection/continuation and broader end-to-end Feishu validation. Ticket remains in progress.
+
+
+### Cross-thread matter continuation update
+
+- The owner can list/select an existing matter from another thread in the same private chat. The runtime injects only the sanitized matter summary and its still-valid explicit memory-space grants; selection clears native CLI history to prevent cross-matter leakage.
+- Regression tests cover list-receipt binding, same-chat/owner restrictions, persistence, grant carryover and native-session isolation.
+- Remaining: broader live Feishu end-to-end validation. Ticket remains in progress.
