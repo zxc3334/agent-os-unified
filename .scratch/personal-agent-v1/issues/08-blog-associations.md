@@ -23,3 +23,11 @@
 - Tests use temporary real storage and cover unauthorized spaces, idempotent references, source immutability, no-connection, stance preservation and denied/authorized public-use paths.
 - Verification after integration: `pnpm test` (73/73), `pnpm build`, `git diff --check`.
 - This is only the domain core. There is no Feishu/ordinary-task command integration, no live search over the authoritative personal/daily stores, no model-driven association generation, and no material-revocation invalidation. The caller must still establish trusted actor/authorized spaces. Ticket remains in progress.
+
+
+### 授权检索更新
+
+- Added `src/core/blog-source-retriever.ts` with separate provider interfaces for personal memory, daily records, and reference materials. Results are re-filtered by trusted space allowlist and active status; excerpts and provenance are bounded; empty allowlist returns no sources; unavailable providers are reported by source kind without forwarding their error messages. Reading author/user perspectives remain separate, and unscoped daily records are excluded.
+- Added an adapter for `JsonTextMaterialLibrary` that rechecks scope while reading cited line excerpts and preserves content-hash version/location. Tests verify actual material revocation, cross-space denial, forgotten/deleted filtering, and provider failures.
+- Verification after integration: `pnpm test` (94/94), `pnpm build`, `git diff --check`.
+- Remaining: user-facing blog entry and decision flow, host-owned invocation authorization, LLM-produced association proposals/drafts, and invalidation or explicit handling of already-persisted proposals when a source is revoked. Ticket remains in progress.

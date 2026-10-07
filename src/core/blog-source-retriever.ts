@@ -1,6 +1,7 @@
 import type { DailyRecord } from './daily-records.js';
 import type { PersonalMemoryEntry } from './personal-memory.js';
 import type { BlogSourceKind, BlogSourceReference } from './blog-associations.js';
+import type { JsonTextMaterialLibrary } from './text-materials.js';
 
 export type BlogRetrievalSourceStatus = 'active' | 'forgotten' | 'deleted' | 'unavailable';
 
@@ -11,7 +12,7 @@ export interface BlogSourceCandidate {
   status: BlogRetrievalSourceStatus;
   text: string;
   date?: string;
-  version?: number;
+  version?: number | string;
   location?: string;
   /** Kept separate so reading claims are not confused with the user's response. */
   authorView?: string;
@@ -40,7 +41,7 @@ export interface BlogRetrievedSource {
     sourceKind: BlogSourceKind;
     sourceId: string;
     date?: string;
-    version?: number;
+    version?: number | string;
     location?: string;
   };
   perspectives?: { authorView?: string; userView?: string };
@@ -154,6 +155,21 @@ export function dailyRecordSearchProvider(store: {
           ...(record.authorView ? { authorView: record.authorView } : {}),
           ...(record.userView ? { userView: record.userView } : {}),
         }));
+    },
+  };
+}
+
+/** Adapter for owner-owned reference materials; it always rechecks scope on excerpt reads. */
+export function textMaterialSearchProvider(library: Pick<JsonTextMaterialLibrary, 'search' | 'readExcerpt'>): BlogSourceSearchProvider {
+  return {
+    async search({ query, authorizedSpaceIds, limit }) {
+      return library.search(query, authorizedSpaceIds, limit).flatMap((hit) => {
+        const excerpt = library.readExcerpt(hit.materialId, { start: hit.startLine, end: hit.endLine }, authorizedSpaceIds);
+        return excerpt ? [{
+          id: excerpt.materialId, spaceId: excerpt.spaceId, status: 'active' as const, text: excerpt.text,
+          version: excerpt.version, location: `lines ${excerpt.startLine}-${excerpt.endLine}`,
+        }] : [];
+      });
     },
   };
 }

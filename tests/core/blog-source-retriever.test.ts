@@ -8,10 +8,12 @@ import {
   dailyRecordSearchProvider,
   personalMemorySearchProvider,
   retrieveBlogSources,
+  textMaterialSearchProvider,
   type BlogSourceCandidate,
   type BlogSourceSearchProvider,
 } from '../../src/core/blog-source-retriever.js';
 import { PersonalMemoryStore } from '../../src/core/personal-memory.js';
+import { JsonTextMaterialLibrary } from '../../src/core/text-materials.js';
 
 const message = {
   sourceId: 'message-1', actorId: 'owner', receivedAt: '2026-10-07T02:00:00.000Z', timezone: 'Asia/Shanghai',
@@ -132,4 +134,33 @@ test('bounds result count and excerpts, omits unscoped daily records, and reject
   await assert.rejects(() => retrieveBlogSources({
     memories: emptyProvider, dailyRecords: emptyProvider, materials: emptyProvider,
   }, { query: '  ', authorizedSpaceIds: ['space-a'] }), /query must not be empty/);
+});
+
+test('text material adapter returns line and content-hash provenance and stops exposing revoked text', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-os-blog-material-adapter-'));
+  try {
+    const memory = new PersonalMemoryStore({ directory: join(directory, 'memory'), ownerId: 'owner' });
+    const career = await memory.createSpace('求职');
+    const reading = await memory.createSpace('阅读');
+    const materials = new JsonTextMaterialLibrary(join(directory, 'materials.json'), 'owner');
+    const material = await materials.add({
+      operationId: 'blog-material', spaceId: career.id, title: 'Project paper',
+      content: 'First line\nCache invalidation evidence is on line two.', receivedAt: message.receivedAt,
+    });
+    const providers = {
+      memories: emptyProvider, dailyRecords: emptyProvider, materials: textMaterialSearchProvider(materials),
+    };
+    const result = await retrieveBlogSources(providers, { query: 'invalidation evidence', authorizedSpaceIds: [career.id] });
+    assert.equal(result.sources.length, 1);
+    assert.equal(result.sources[0]?.provenance.version, material.version);
+    assert.equal(result.sources[0]?.provenance.location, 'lines 2-2');
+    assert.equal(result.sources[0]?.reference.spaceId, career.id);
+    const denied = await retrieveBlogSources(providers, { query: 'invalidation evidence', authorizedSpaceIds: [reading.id] });
+    assert.deepEqual(denied.sources, []);
+    await materials.revoke(material.id, '2026-10-07T03:00:00.000Z', [career.id]);
+    const afterRevocation = await retrieveBlogSources(providers, { query: 'invalidation evidence', authorizedSpaceIds: [career.id] });
+    assert.deepEqual(afterRevocation.sources, []);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
 });
