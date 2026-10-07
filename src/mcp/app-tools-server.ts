@@ -7,6 +7,7 @@ import { DispatchTaskRequestSchema } from '../core/collaboration.js';
 import { ScheduleManageRequestSchema } from '../core/schedule.js';
 import { ApprovalRequestSchema } from '../core/approval.js';
 import { SaveMemorySchema } from '../core/save-memory.js';
+import { RememberPersonalMemorySchema } from '../core/personal-memory-tool.js';
 import {
   CLARIFICATION_TOOL_NAME,
   PRODUCT_SPEC_TOOL_NAME,
@@ -14,6 +15,7 @@ import {
   REQUEST_APPROVAL_TOOL_NAME,
   SCHEDULE_MANAGE_TOOL_NAME,
   SAVE_MEMORY_TOOL_NAME,
+  SAVE_PERSONAL_MEMORY_TOOL_NAME,
 } from '../cli/app-tools.js';
 
 const server = new McpServer({
@@ -175,6 +177,55 @@ server.registerTool(
       text: '审批请求已交给 Agent OS，等待用户拍板。',
     }],
   }),
+);
+
+async function callPersonalMemory(input: unknown): Promise<{
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: boolean;
+}> {
+  const parsed = RememberPersonalMemorySchema.safeParse(input);
+  if (!parsed.success) {
+    return { content: [{ type: 'text', text: `个人记忆参数不合法：${JSON.stringify(parsed.error.issues)}` }], isError: true };
+  }
+  const token = process.env.AGENT_OS_PERSONAL_MEMORY_TOKEN;
+  const port = Number(process.env.AGENT_OS_PERSONAL_MEMORY_API_PORT);
+  if (!token || !Number.isInteger(port) || port < 1 || port > 65_535) {
+    return { content: [{ type: 'text', text: '当前执行没有获得个人记忆写入授权；未保存。' }], isError: true };
+  }
+  let response: Response;
+  try {
+    response = await fetch(`http://127.0.0.1:${port}/api/personal-memory/remember`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', 'x-personal-memory-token': token },
+      body: JSON.stringify(parsed.data),
+    });
+  } catch (error) {
+    return { content: [{ type: 'text', text: `个人记忆存储不可用，未确认保存：${(error as Error).message}` }], isError: true };
+  }
+  const payload = await response.json().catch(() => undefined) as
+    | { status?: string; entryId?: string; space?: string; confidence?: string; error?: string }
+    | undefined;
+  if (!response.ok) {
+    return { content: [{ type: 'text', text: `个人记忆保存失败（${response.status}）：${payload?.error ?? '未知错误'}；未确认保存。` }], isError: true };
+  }
+  const state = payload?.status === 'already_applied' ? '之前已保存' : '已持久保存';
+  return { content: [{ type: 'text', text: `${state}个人记忆：${payload?.entryId}；空间：${payload?.space}；状态：${payload?.confidence}。` }] };
+}
+
+server.registerTool(
+  SAVE_PERSONAL_MEMORY_TOOL_NAME,
+  {
+    title: '保存一条个人记忆或日常记录',
+    description: [
+      '只有在用户明确要求记住/保存，或用户自然分享了明确的日常经历、偏好时才调用；普通对话不要自动沉淀。',
+      'kind 区分 fact、preference、decision、opinion、event；学习考点请继续使用 save_memory。',
+      'spaceName 使用简短、自然的记忆空间名，例如“求职”“项目 Alpha”“阅读”“日常生活”；没有合适空间时由 Agent OS 在用户授权下创建。',
+      'content 只概括用户原话支持的内容，不虚构事实；不确定的内容会作为待确认候选保存。',
+      '调用只有在 Agent OS 已完成本地持久保存后才会返回成功；失败时必须如实告知用户。',
+    ].join(''),
+    inputSchema: RememberPersonalMemorySchema,
+  },
+  async (input) => callPersonalMemory(input),
 );
 
 server.registerTool(

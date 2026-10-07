@@ -28,6 +28,7 @@ import { resolveMentions, extractResourceKeys } from './im/message-parser.js';
 import { parseCliRequest, parseCommand } from './core/command-parser.js';
 import { PersonalMemoryStore } from './core/personal-memory.js';
 import { preparePersonalMemoryContext } from './core/personal-memory-context.js';
+import { PersonalMemoryToolBridge } from './app/personal-memory-bridge.js';
 import { SessionManager } from './core/session-manager.js';
 import { JsonSessionStore } from './core/session-store.js';
 import { TaskProgressTracker } from './core/task-progress.js';
@@ -135,6 +136,20 @@ const approvalFlows = new JsonApprovalFlowStore(
   join('data', 'approval-flows.json'),
 );
 const unifiedTaskStore = new JsonUnifiedTaskStore(join('data', 'unified-tasks.json'));
+const configuredOwnerOpenId = process.env.OWNER_OPEN_ID?.trim() || undefined;
+const privateDataRoot = resolve(process.env.AGENT_OS_DATA_ROOT ?? join('data'));
+const personalMemoryStore = configuredOwnerOpenId
+  ? new PersonalMemoryStore({
+      directory: join(privateDataRoot, 'personal-memory'),
+      ownerId: configuredOwnerOpenId,
+    })
+  : undefined;
+const personalMemoryBridge = personalMemoryStore
+  ? new PersonalMemoryToolBridge(personalMemoryStore)
+  : undefined;
+const personalMemoryApiPort = personalMemoryBridge
+  ? await personalMemoryBridge.start(Number(process.env.AGENT_OS_PERSONAL_MEMORY_API_PORT ?? 0))
+  : undefined;
 const processedDocumentCommentEvents = new Set<string>();
 const documentCommentQueues = new Map<string, Promise<void>>();
 const MAX_REMEMBERED_DOCUMENT_COMMENT_EVENTS = 1_000;
@@ -150,6 +165,7 @@ const runtime: AppRuntime = {
   productSpecFlows,
   approvalFlows,
   unifiedTaskStore,
+  personalMemoryBridge,
 };
 function persistBotIdentities(): void {
   const identities = Object.fromEntries(
@@ -166,14 +182,6 @@ function persistBotIdentities(): void {
   );
 }
 const collaborationService = new CollaborationService(runtime);
-const configuredOwnerOpenId = process.env.OWNER_OPEN_ID?.trim() || undefined;
-const privateDataRoot = resolve(process.env.AGENT_OS_DATA_ROOT ?? join('data'));
-const personalMemoryStore = configuredOwnerOpenId
-  ? new PersonalMemoryStore({
-      directory: join(privateDataRoot, 'personal-memory'),
-      ownerId: configuredOwnerOpenId,
-    })
-  : undefined;
 const scheduleFilePath = join('data', 'schedules.json');
 const scheduleStore = new JsonScheduleStore(scheduleFilePath);
 const scheduleRunStore = new JsonScheduleRunStore(
@@ -544,12 +552,28 @@ async function startConfiguredBot(
       const progressHeartbeat = setInterval(renderProgress, 1_000);
       progressHeartbeat.unref();
 
-      const cliEnv = {
+      const memoryInvocation = personalMemoryBridge && personalMemoryStore
+        && msg.chatType === 'p2p'
+        && msg.senderOpenId === configuredOwnerOpenId
+        ? personalMemoryBridge.issue({
+            actorId: msg.senderOpenId,
+            ownerId: configuredOwnerOpenId,
+            sourceId: msg.messageId,
+            receivedAt: msg.receivedAt,
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
+            sourceText: msg.text,
+          })
+        : undefined;
+      const cliEnv: Record<string, string> = {
         AGENT_OS_CHAT_ID: msg.chatId,
         AGENT_OS_OWNER_OPEN_ID: collaboration?.ownerOpenId ?? msg.senderOpenId,
         // agy 没有项目级 MCP 配置，只能走全局垫片；垫片靠它找到本次运行的安装目录。
         AGENT_OS_HOME: resolve(import.meta.dirname, '..'),
       };
+      if (memoryInvocation && personalMemoryApiPort !== undefined) {
+        cliEnv.AGENT_OS_PERSONAL_MEMORY_API_PORT = String(personalMemoryApiPort);
+        cliEnv.AGENT_OS_PERSONAL_MEMORY_TOKEN = memoryInvocation.token;
+      }
 
       // 让事件回调尽快返回，CLI 在后台继续执行。
       const execution = isCompacting
@@ -1043,6 +1067,7 @@ async function startConfiguredBot(
           } catch (error) {
             console.error('[会话] 保存空闲状态失败:', (error as Error).message);
           }
+          memoryInvocation?.release();
         })
         .catch((error) => {
           console.error('[任务] 回传或收尾失败:', (error as Error).message);

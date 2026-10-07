@@ -115,6 +115,11 @@ const MAX_REVISIONS = 20;
 function ownerScopedKey(ownerId: string, value: string): string {
   return `${ownerId}\u0000${value}`;
 }
+
+function sourceContentKey(ownerId: string, sourceId: string, content: string): string {
+  const digest = createHash('sha256').update(content.normalize('NFKC').trim()).digest('hex');
+  return `${ownerScopedKey(ownerId, sourceId)}\u0000${digest}`;
+}
 const DEFAULT_LOCK_TIMEOUT_MS = 15_000;
 
 function asNonEmpty(value: string, name: string, maxLength = 300): string {
@@ -303,7 +308,7 @@ export class PersonalMemoryStore {
         if (prior?.status === 'active') return { status: 'already_applied', entry: prior };
         return { status: 'suppressed' };
       }
-      if (state.suppressedSourceIds.includes(ownerScopedKey(this.ownerId, source.sourceId))) return { status: 'suppressed' };
+      if (state.suppressedSourceIds.includes(sourceContentKey(this.ownerId, source.sourceId, content))) return { status: 'suppressed' };
 
       const now = new Date().toISOString();
       const entry: PersonalMemoryEntry = {
@@ -426,7 +431,7 @@ export class PersonalMemoryStore {
       entry.version += 1;
       entry.updatedAt = new Date().toISOString();
       for (const source of entry.sources) {
-        const key = ownerScopedKey(this.ownerId, source.sourceId);
+        const key = sourceContentKey(this.ownerId, source.sourceId, entry.content);
         if (!state.suppressedSourceIds.includes(key)) state.suppressedSourceIds.push(key);
       }
       return true;
@@ -440,6 +445,7 @@ export class PersonalMemoryStore {
       if (expectedVersion !== undefined && entry.version !== expectedVersion) {
         throw new Error(`Version conflict: expected ${expectedVersion}, current ${entry.version}`);
       }
+      const forgottenContent = entry.content;
       entry.status = 'forgotten';
       entry.version += 1;
       entry.updatedAt = new Date().toISOString();
@@ -450,7 +456,7 @@ export class PersonalMemoryStore {
         sourceId, actorId, receivedAt, timezone, ...(occurredAt ? { occurredAt } : {}),
       }));
       for (const source of entry.sources) {
-        const key = ownerScopedKey(this.ownerId, source.sourceId);
+        const key = sourceContentKey(this.ownerId, source.sourceId, forgottenContent);
         if (!state.suppressedSourceIds.includes(key)) state.suppressedSourceIds.push(key);
       }
       if (entry.operationId) {

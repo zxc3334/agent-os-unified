@@ -8,6 +8,7 @@ import type { ApprovalFlowStore } from '../core/approval.js';
 import type { SessionManager } from '../core/session-manager.js';
 import type { TeamRegistry } from '../core/team-registry.js';
 import type { UnifiedTaskStore } from './unified-task-runtime.js';
+import type { PersonalMemoryToolBridge } from './personal-memory-bridge.js';
 
 export interface BotRuntime {
   config: BotConfig;
@@ -27,4 +28,5 @@ export interface AppRuntime {
   productSpecFlows: ProductSpecFlowStore;
   approvalFlows: ApprovalFlowStore;
   unifiedTaskStore: UnifiedTaskStore;
+  personalMemoryBridge?: PersonalMemoryToolBridge;
 }

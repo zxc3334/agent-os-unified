@@ -6,6 +6,7 @@ export const DISPATCH_TASK_TOOL_NAME = 'dispatch_task';
 export const REQUEST_APPROVAL_TOOL_NAME = 'request_approval';
 export const SCHEDULE_MANAGE_TOOL_NAME = 'schedule_manage';
 export const SAVE_MEMORY_TOOL_NAME = 'save_memory';
+export const SAVE_PERSONAL_MEMORY_TOOL_NAME = 'save_personal_memory';
 export const CLAUDE_CLARIFICATION_TOOL_NAME =
   `mcp__agent_os__${CLARIFICATION_TOOL_NAME}`;
 export const CLAUDE_PRODUCT_SPEC_TOOL_NAME =
@@ -18,6 +19,8 @@ export const CLAUDE_SCHEDULE_MANAGE_TOOL_NAME =
   `mcp__agent_os__${SCHEDULE_MANAGE_TOOL_NAME}`;
 export const CLAUDE_SAVE_MEMORY_TOOL_NAME =
   `mcp__agent_os__${SAVE_MEMORY_TOOL_NAME}`;
+export const CLAUDE_SAVE_PERSONAL_MEMORY_TOOL_NAME =
+  `mcp__agent_os__${SAVE_PERSONAL_MEMORY_TOOL_NAME}`;
 
 function serverInvocation(): { command: string; args: string[] } {
   const runningFromTypeScript = import.meta.url.endsWith('.ts');
