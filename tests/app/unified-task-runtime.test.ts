@@ -322,3 +322,34 @@ test('versioned synthetic replay cases assert deterministic adapter and permissi
   assert.equal(results.length, PERSONAL_AGENT_REPLAY_FIXTURES.length);
   assert.ok(results.every((result) => result.passed && result.fixtureVersion === 1));
 });
+
+test('collaboration worker runs stay in a stable workflow affair without inheriting personal-memory grants', async () => {
+  await withStore(async (filePath) => {
+    const store = new JsonUnifiedTaskStore(filePath);
+    const seen: unknown[] = [];
+    const runtime = new UnifiedTaskRuntime({
+      store,
+      id: () => 'collaboration-run-1',
+      now: () => fixedTime,
+      memoryContext: {
+        async prepare(input) {
+          seen.push({ actorId: input.actorId, ownerId: input.ownerId, affairId: input.affairId, source: input.trigger.source, spaces: [...input.authorizedMemorySpaceIds] });
+          return undefined;
+        },
+      },
+      executor: { async execute() { return { outcome: 'succeeded', result: 'worker result', artifacts: [] }; } },
+    });
+    const task = await runtime.run({
+      trusted: { actorId: 'worker-bot', ownerId: 'origin-owner' },
+      affairId: workflowAffairId('collaboration-task-1'),
+      trigger: { source: 'collaboration', sourceId: 'dispatch-1', occurredAt: fixedTime },
+      authorizedMemorySpaceIds: [],
+      input: { dispatchId: 'dispatch-1', targetBotId: 'worker-bot' },
+      signal: new AbortController().signal,
+    });
+    assert.equal(task.status, 'succeeded');
+    assert.equal(task.affairId, 'workflow:collaboration-task-1');
+    assert.deepEqual(seen, [{ actorId: 'worker-bot', ownerId: 'origin-owner', affairId: 'workflow:collaboration-task-1', source: 'collaboration', spaces: [] }]);
+    assert.deepEqual((await new JsonUnifiedTaskStore(filePath).list(task.affairId)).map((saved) => saved.id), ['collaboration-run-1']);
+  });
+});
