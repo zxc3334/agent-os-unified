@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { handleSessionCommand } from '../../src/app/command-handler.js';
 import { JsonDailyRecordsReminders } from '../../src/core/daily-records.js';
 import { parseCommand } from '../../src/core/command-parser.js';
+import { JsonBlogAssociations } from '../../src/core/blog-associations.js';
 
 async function setup() {
   const directory = await mkdtemp(join(tmpdir(), 'agent-os-daily-command-'));
@@ -69,6 +70,31 @@ test('private daily records and reminders persist with trusted source dates and 
     assert.ok(ctx.scheduled.includes(failed.id));
     assert.match(ctx.replies.at(-1)!, /实际发送回执/);
     assert.equal(ctx.dailyRecords.getRecord(record.id)?.content, 'Read a chapter about attention');
+  } finally { await rm(ctx.directory, { recursive: true, force: true }); }
+});
+
+test('reclassifying a daily record invalidates old-space blog references but leaves the record intact', async () => {
+  const ctx = await setup();
+  try {
+    await handleSessionCommand({ ...ctx.options, command: parseCommand('/daily add reading Read about memory systems') });
+    const record = ctx.dailyRecords.listRecords()[0]!;
+    const blogAssociations = new JsonBlogAssociations(join(ctx.directory, 'blog.json'));
+    const proposal = blogAssociations.proposeAssociation({
+      initiatedBy: 'user', operationId: 'daily-source-proposal', actorId: 'owner',
+      createdAt: '2026-10-07T10:00:00.000Z', authorizedSpaceIds: ['reading', 'career'],
+      sources: [
+        { kind: 'daily-record', id: record.id, spaceId: 'reading' },
+        { kind: 'memory', id: 'career-memory', spaceId: 'career' },
+      ], reasoning: 'Potential relation.', intendedUse: 'Private blog draft.',
+    });
+    await handleSessionCommand({
+      ...ctx.options, blogAssociations,
+      command: parseCommand(`/daily scope ${record.id} career`),
+    });
+    assert.equal(blogAssociations.areProposalSourcesActive(proposal.id), false);
+    assert.equal(ctx.dailyRecords.getRecord(record.id)?.scopeId, 'career');
+    assert.equal(ctx.dailyRecords.getRecord(record.id)?.content, 'Read about memory systems');
+    assert.match(ctx.replies.at(-1)!, /旧空间中的博客引用已失效/);
   } finally { await rm(ctx.directory, { recursive: true, force: true }); }
 });
 

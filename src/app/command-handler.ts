@@ -148,8 +148,16 @@ export async function handleSessionCommand(options: {
           });
           await bot.reply(msg.messageId, `已保存${command.kind === "daily" ? "日常" : command.kind === "reading" ? "阅读" : "探索"}记录 [${record.id}]（${record.date}）。这只是带日期的记录，不会自动变成长久偏好或提醒。`, hasThread);
         } else if (command.action === "scope") {
+          const previous = dailyRecords.getRecord(command.recordId);
+          if (previous && previous.scopeId && previous.scopeId !== command.scopeId && blogAssociations) {
+            // Invalidate first: if the record write later fails, stale citations still fail closed;
+            // if invalidation itself fails, the old scope remains and this command can be retried.
+            blogAssociations.invalidateSource(
+              { kind: "daily-record", id: previous.id, spaceId: previous.scopeId }, "revoked", msg.receivedAt,
+            );
+          }
           const record = dailyRecords.setRecordScope(command.recordId, command.scopeId);
-          await bot.reply(msg.messageId, record ? `记录 [${record.id}] 的归属已调整为「${record.scopeId ?? "未分类"}」。` : "没有找到这条记录。", hasThread);
+          await bot.reply(msg.messageId, record ? `记录 [${record.id}] 的归属已调整为「${record.scopeId ?? "未分类"}」${previous?.scopeId && previous.scopeId !== record.scopeId ? "，旧空间中的博客引用已失效" : ""}。` : "没有找到这条记录。", hasThread);
         } else {
           const range = command.action === "recap"
             ? { from: command.from, through: command.through }
