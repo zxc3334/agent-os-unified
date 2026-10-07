@@ -363,7 +363,12 @@ async function startConfiguredBot(
         && msg.chatType === 'p2p'
         && msg.senderOpenId === configuredOwnerOpenId) {
         authorizedPersonalSpaceIds = await personalMemoryStore.listSpaces()
-          .then((spaces) => spaces.map((space) => space.id))
+          .then((spaces) => {
+            const available = spaces.map((space) => space.id);
+            return session.memorySpaceIds === undefined
+              ? available
+              : available.filter((spaceId) => session.memorySpaceIds?.includes(spaceId));
+          })
           .catch((error) => {
             console.warn('[个人记忆] 空间列表读取失败:', (error as Error).message);
             return [];

@@ -11,6 +11,8 @@ export interface Session {
   chatId: string;
   cliId: CliId;
   cliSessionId?: string;
+  /** Matter-scoped personal-memory allowlist; undefined means owner-authorized defaults. */
+  memorySpaceIds?: string[];
   workspaceDir: string;
   status: SessionStatus;
   createdAt: string;
@@ -173,6 +175,30 @@ export class SessionManager {
     const updated: Session = {
       ...current,
       cliSessionId,
+      updatedAt: this.now().toISOString(),
+    };
+    const key = sessionKey(updated.botId, updated.chatId, updated.threadId);
+    this.sessions.set(key, updated);
+    try {
+      await this.persist();
+    } catch (error) {
+      if (this.sessions.get(key) === updated) this.sessions.set(key, current);
+      throw error;
+    }
+    return updated;
+  }
+
+  async setMemorySpaceIds(
+    sessionId: string,
+    memorySpaceIds: readonly string[] | undefined,
+  ): Promise<Session> {
+    const current = this.get(sessionId);
+    if (!current) throw new Error(`会话不存在: ${sessionId}`);
+    const updated: Session = {
+      ...current,
+      ...(memorySpaceIds === undefined
+        ? { memorySpaceIds: undefined }
+        : { memorySpaceIds: [...new Set(memorySpaceIds)] }),
       updatedAt: this.now().toISOString(),
     };
     const key = sessionKey(updated.botId, updated.chatId, updated.threadId);

@@ -103,8 +103,8 @@ export async function handleSessionCommand(options: {
   }
 
   if (command?.name === "memory") {
-    if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId) {
-      await bot.reply(msg.messageId, "个人记忆命令仅限配置的所有者使用。", hasThread);
+    if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId || msg.chatType !== "p2p") {
+      await bot.reply(msg.messageId, "个人记忆命令仅限所有者在私聊中使用。", hasThread);
       return "handled";
     }
     if (!personalMemoryStore) {
@@ -132,8 +132,27 @@ export async function handleSessionCommand(options: {
     }
     try {
       const spaces = await personalMemoryStore.listSpaces();
-      const authorizedSpaceIds = spaces.map((space) => space.id);
+      const allSpaceIds = spaces.map((space) => space.id);
+      const authorizedSpaceIds = allSpaceIds;
       const names = new Map(spaces.map((space) => [space.id, space.name]));
+      if (command.action === "spaces") {
+        const activeIds = session.memorySpaceIds;
+        const lines = spaces.map((space) => `${activeIds === undefined || activeIds.includes(space.id) ? "✅" : "○"} ${space.name} — ${space.id}`);
+        await bot.reply(msg.messageId, `${lines.length ? lines.join("\n") : "尚无记忆空间。"}\n本事项当前：${activeIds === undefined ? "使用全部个人空间（仍只在相关时召回）" : activeIds.length ? "限定于已选空间" : "不读取个人记忆"}。\n设置：/memory scope <空间ID|all>`, hasThread);
+        return "handled";
+      }
+      if (command.action === "scope") {
+        if (command.spaceId !== "all" && !allSpaceIds.includes(command.spaceId)) {
+          await bot.reply(msg.messageId, "没有找到这个个人记忆空间。可用 /memory spaces 查看 ID。", hasThread);
+          return "handled";
+        }
+        const updated = command.spaceId === "all"
+          ? await runtime.sessions.setMemorySpaceIds(session.id, undefined)
+          : await runtime.sessions.setMemorySpaceIds(session.id, [command.spaceId]);
+        const selected = command.spaceId === "all" ? "全部个人记忆空间" : names.get(command.spaceId) ?? command.spaceId;
+        await bot.reply(msg.messageId, `本事项的个人记忆范围已设为「${selected}」。`, hasThread);
+        return "handled";
+      }
       if (command.action === "review" || command.action === "recent") {
         const pageSize = 5;
         const fetchLimit = command.page * pageSize;
@@ -201,6 +220,7 @@ export async function handleSessionCommand(options: {
         "/schedules 查看定时任务",
         "/topics 扫描有哪些素材够写一篇博客了",
         "/memory [review|recent] [页码] 查看待确认或最近记忆（每页最多 5 条）",
+        "/memory spaces 查看个人记忆空间；/memory scope <空间ID|all> 设置本事项的记忆范围",
         "/memory extract 从当前项目待处理对话中恢复并执行学习记忆提取",
         "/skills 查看个人能力包；/skills enable|disable <id> 管理能力包",
         "/memory confirm <id>、/memory correct <id> <内容>、/memory reject <id>、/memory forget <id>",

@@ -25,9 +25,9 @@ async function setup() {
     reply: async (_id: string, text: string) => { replies.push(text); return undefined; },
   } as never;
   const options = {
-    runtime: {}, scheduler: {}, config: {}, bot,
-    msg: { senderOpenId: 'owner-open-id', messageId: 'test-message', receivedAt: '2026-10-07T12:00:00.000Z' },
-    session: { status: 'idle' }, cliAdapter: {}, isNew: false, hasThread: false,
+    runtime: { sessions: { setMemorySpaceIds: async (_id: string, ids: string[] | undefined) => ({ memorySpaceIds: ids }) } }, scheduler: {}, config: {}, bot,
+    msg: { senderOpenId: 'owner-open-id', chatType: 'p2p', messageId: 'test-message', receivedAt: '2026-10-07T12:00:00.000Z' },
+    session: { id: 'session-1', status: 'idle' }, cliAdapter: {}, isNew: false, hasThread: false,
     personalMemoryStore: store, trustedOwnerOpenId: 'owner-open-id',
   } as never;
   return { directory, store, space, entry, replies, options };
@@ -37,6 +37,9 @@ test('memory command grammar leaves existing command parsing compatible', () => 
   assert.deepEqual(parseCommand('/memory'), { name: 'memory', action: 'review', page: 1 });
   assert.deepEqual(parseCommand('/memory recent 2'), { name: 'memory', action: 'recent', page: 2 });
   assert.deepEqual(parseCommand('/memory extract'), { name: 'memory', action: 'extract' });
+  assert.deepEqual(parseCommand('/memory spaces'), { name: 'memory', action: 'spaces' });
+  assert.deepEqual(parseCommand('/memory scope all'), { name: 'memory', action: 'scope', spaceId: 'all' });
+  assert.deepEqual(parseCommand('/memory scope job-search'), { name: 'memory', action: 'scope', spaceId: 'job-search' });
   assert.deepEqual(parseCommand('/skills'), { name: 'skills', action: 'list' });
   assert.deepEqual(parseCommand('/skills enable career-interview'), { name: 'skills', action: 'enable', skillId: 'career-interview' });
   assert.equal(parseCommand('/skills enable ../../escape'), undefined);
@@ -74,13 +77,13 @@ test('only the configured actor can mutate, and confirm/correct/reject/forget pe
   const ctx = await setup();
   try {
     await handleSessionCommand({
-      ...ctx.options, msg: { senderOpenId: 'attacker', messageId: 'x', receivedAt: '2026-10-07T12:00:00.000Z' },
+      ...ctx.options, msg: { senderOpenId: 'attacker', chatType: 'p2p', messageId: 'x', receivedAt: '2026-10-07T12:00:00.000Z' },
       command: parseCommand(`/memory confirm ${ctx.entry.id}`),
     });
-    assert.match(ctx.replies.at(-1)!, /仅限配置的所有者/);
+    assert.match(ctx.replies.at(-1)!, /仅限所有者在私聊中使用/);
     assert.equal((await ctx.store.get(ctx.entry.id, { authorizedSpaceIds: [ctx.space.id] }))?.confidence, 'inferred');
 
-    const msg = { senderOpenId: 'owner-open-id', messageId: 'x', receivedAt: '2026-10-07T12:00:00.000Z' };
+    const msg = { senderOpenId: 'owner-open-id', chatType: 'p2p', messageId: 'x', receivedAt: '2026-10-07T12:00:00.000Z' };
     await handleSessionCommand({ ...ctx.options, msg, command: parseCommand(`/memory confirm ${ctx.entry.id}`) });
     assert.equal((await ctx.store.get(ctx.entry.id, { authorizedSpaceIds: [ctx.space.id] }))?.confidence, 'user_confirmed');
     await handleSessionCommand({ ...ctx.options, msg, command: parseCommand(`/memory correct ${ctx.entry.id} 已核实的新内容`) });
@@ -102,6 +105,30 @@ test('only the configured actor can mutate, and confirm/correct/reject/forget pe
     assert.equal(forgotten?.status, 'forgotten');
     assert.equal(forgotten?.content, '');
     assert.doesNotMatch(ctx.replies.at(-1)!, /已核实的新内容/);
+  } finally {
+    await rm(ctx.directory, { recursive: true, force: true });
+  }
+});
+
+
+test('owner can inspect spaces and scope the current matter; group chats are denied', async () => {
+  const ctx = await setup();
+  try {
+    await handleSessionCommand({ ...ctx.options, command: parseCommand('/memory spaces') });
+    assert.match(ctx.replies.at(-1)!, new RegExp(ctx.space.id));
+    assert.match(ctx.replies.at(-1)!, /使用全部个人空间/);
+
+    await handleSessionCommand({ ...ctx.options, command: parseCommand(`/memory scope ${ctx.space.id}`) });
+    assert.match(ctx.replies.at(-1)!, /本事项的个人记忆范围已设为/);
+
+    ctx.replies.length = 0;
+    await handleSessionCommand({
+      ...ctx.options,
+      msg: { ...ctx.options.msg, chatType: 'group' },
+      command: parseCommand('/memory spaces'),
+    });
+    assert.match(ctx.replies.at(-1)!, /仅限所有者在私聊中使用/);
+    assert.doesNotMatch(ctx.replies.at(-1)!, new RegExp(ctx.space.id));
   } finally {
     await rm(ctx.directory, { recursive: true, force: true });
   }

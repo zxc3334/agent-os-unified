@@ -15,6 +15,7 @@ const SessionSchema = z.object({
   chatId: z.string().min(1),
   cliId: z.enum(['agy', 'pi', 'claude', 'codex']),
   cliSessionId: z.string().min(1).optional(),
+  memorySpaceIds: z.array(z.string().min(1)).optional(),
   workspaceDir: z.string().min(1),
   status: z.enum(['creating', 'active', 'idle', 'closed']),
   createdAt: z.iso.datetime(),

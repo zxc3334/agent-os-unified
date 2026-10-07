@@ -9,7 +9,8 @@ export type SlashCommand =
   | { name: 'schedule'; request?: string }
   | { name: 'skills'; action: 'list' | 'enable' | 'disable'; skillId?: string }
   | { name: 'memory'; action: 'review' | 'recent'; page: number }
-  | { name: 'memory'; action: 'extract' }
+  | { name: 'memory'; action: 'extract' | 'spaces' }
+  | { name: 'memory'; action: 'scope'; spaceId: string }
   | { name: 'memory'; action: 'confirm' | 'reject' | 'forget'; entryId: string }
   | { name: 'memory'; action: 'correct'; entryId: string; content: string };
 
@@ -40,8 +41,13 @@ export function parseCommand(text: string): SlashCommand | undefined {
   if (memoryMatch) {
     const args = memoryMatch[1]?.trim().split(/\s+/, 3) ?? [];
     const action = args[0] || 'review';
-    if (action === 'extract') {
+    if (action === 'extract' || action === 'spaces') {
       return args.length === 1 ? { name: 'memory', action } : undefined;
+    }
+    if (action === 'scope') {
+      return args.length === 2 && (args[1] === 'all' || MEMORY_ID_RE.test(args[1] ?? ''))
+        ? { name: 'memory', action, spaceId: args[1] as string }
+        : undefined;
     }
     if (action === 'review' || action === 'recent') {
       if (args.length > 2) return undefined;
