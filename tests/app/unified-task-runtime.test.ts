@@ -6,6 +6,8 @@ import { test } from 'node:test';
 import {
   JsonUnifiedTaskStore,
   UnifiedTaskRuntime,
+  conversationAffairId,
+  workflowAffairId,
   type UnifiedTask,
 } from '../../src/app/unified-task-runtime.js';
 
@@ -166,4 +168,13 @@ test('task records are defensively copied at the store seam', async () => {
     const saved = await new JsonUnifiedTaskStore(filePath).get('run-copy') as UnifiedTask | undefined;
     assert.deepEqual(saved?.result, { nested: ['safe'] });
   });
+});
+
+
+test('affair identities remain stable across bot and engine changes', () => {
+  assert.equal(conversationAffairId('chat-1', 'thread-2'), conversationAffairId('chat-1', 'thread-2'));
+  assert.equal(conversationAffairId('chat:1', 'thread:2'), 'conversation:chat%3A1:thread%3A2');
+  assert.notEqual(conversationAffairId('chat-1', 'thread-2'), conversationAffairId('chat-1', 'thread-3'));
+  assert.equal(workflowAffairId('flow-1'), workflowAffairId('flow-1'));
+  assert.throws(() => conversationAffairId('', 'thread'), /required/);
 });

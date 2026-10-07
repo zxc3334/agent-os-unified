@@ -31,3 +31,11 @@
 - Engine changes within an existing Agent OS session now preserve the matter identifier while clearing engine-native session IDs; switching during an active run is rejected. Regression tests verify persistence and the no-cross-engine-history boundary.
 - Verification after this change: `pnpm test` (48/48), `pnpm build`, `git diff --check`.
 - Remaining exactly: collaboration task dispatch/worker execution and end-to-end route tests for continuation handlers (including UI/card and product-spec retry behavior); affair summary carryover across engine/member changes; reconciliation of persisted partial CLI outcomes with existing task UI. Ticket remains in progress.
+
+
+### Stable affair identity update
+
+- Added `conversationAffairId(chatId, threadId)` and `workflowAffairId(taskId)`. Conversation task records now group across bot/engine changes without sharing their native CLI session; approval, clarification, comments, collaboration and scheduled runs use stable workflow/task IDs.
+- Regression test verifies deterministic identity independent of worker identity and rejects empty identifiers.
+- Verification: `pnpm test` (74/74), `pnpm build`, `git diff --check`.
+- Remaining: user-facing cross-thread matter selection/continuation, carryover of a concise authorized affair summary, collaboration lifecycle end-to-end test/dispatch reconciliation, and partial-result UI reconciliation. Ticket remains in progress.

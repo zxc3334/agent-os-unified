@@ -5,6 +5,7 @@ import { executeCli } from './cli-execution.js';
 import { markSessionIdle } from './session-view.js';
 import type { AppRuntime } from './runtime.js';
 import { runContinuationThroughUnifiedTask } from './unified-task-continuation.js';
+import { workflowAffairId } from './unified-task-runtime.js';
 import type { CliRunResult } from '../cli/types.js';
 
 export async function runProductDocumentComment(options: {
@@ -41,7 +42,7 @@ export async function runProductDocumentComment(options: {
       occurredAt: new Date().toISOString(),
       actorId: comment.senderOpenId || 'system:document-comment',
       ownerId: flow.ownerOpenId,
-      affairId: `${flow.botId}:${flow.taskId}`,
+      affairId: workflowAffairId(flow.taskId),
       input: { botId: flow.botId, sessionId: session.id, taskId: flow.taskId, commentId: comment.commentId, fileToken: comment.fileToken },
       signal: run.signal,
       execute: (signal) => executeCli(

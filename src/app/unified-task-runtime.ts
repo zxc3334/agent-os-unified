@@ -3,6 +3,18 @@ import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 /** Trigger kinds intentionally describe transport/workflow, not authority. */
+/** Stable affair IDs deliberately exclude the executing bot/engine identity. */
+export function conversationAffairId(chatId: string, threadId: string): string {
+  if (!chatId.trim() || !threadId.trim()) throw new Error('chatId and threadId are required for a conversation affair');
+  return `conversation:${encodeURIComponent(chatId)}:${encodeURIComponent(threadId)}`;
+}
+
+/** Workflow continuations use their trusted durable task ID as the matter identity. */
+export function workflowAffairId(taskId: string): string {
+  if (!taskId.trim()) throw new Error('taskId is required for a workflow affair');
+  return `workflow:${encodeURIComponent(taskId)}`;
+}
+
 export type UnifiedTaskSource =
   | 'message'
   | 'schedule'

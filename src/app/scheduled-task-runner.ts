@@ -6,7 +6,7 @@ import { resolve } from 'node:path';
 import type { AppRuntime } from './runtime.js';
 import type { ScheduledTask } from '../core/schedule.js';
 import { markSessionIdle } from './session-view.js';
-import { UnifiedTaskRuntime } from './unified-task-runtime.js';
+import { UnifiedTaskRuntime, workflowAffairId } from './unified-task-runtime.js';
 import type { CliRunResult } from '../cli/types.js';
 
 export async function runScheduledTaskDirectly(options: {
@@ -84,7 +84,7 @@ export async function runScheduledTaskDirectly(options: {
       },
     }).run({
       trusted: { actorId: task.creatorOpenId, ownerId: task.creatorOpenId },
-      affairId: `schedule:${task.id}`,
+      affairId: workflowAffairId(`schedule:${task.id}`),
       trigger: { source: 'schedule', sourceId: `${task.id}:${scheduledFor}`, occurredAt: scheduledFor },
       authorizedMemorySpaceIds: [],
       input: { scheduleId: task.id, targetBotId: target.id },

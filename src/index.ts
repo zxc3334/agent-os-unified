@@ -96,7 +96,7 @@ import { Scheduler } from './app/scheduler.js';
 import { startScheduleApi } from './app/schedule-api.js';
 import { startScheduleFileWatcher } from './app/schedule-watcher.js';
 import type { AppRuntime, BotRuntime } from './app/runtime.js';
-import { JsonUnifiedTaskStore, UnifiedTaskRuntime } from './app/unified-task-runtime.js';
+import { JsonUnifiedTaskStore, UnifiedTaskRuntime, conversationAffairId, workflowAffairId } from './app/unified-task-runtime.js';
 import type { CliRunResult } from './cli/types.js';
 
 const botConfigPath = resolve(
@@ -662,7 +662,7 @@ async function startConfiguredBot(
             },
           }).run({
             trusted: { actorId: msg.senderOpenId, ownerId: ownerOpenId },
-            affairId: `${config.id}:${msg.chatId}:${session.threadId}`,
+            affairId: collaboration ? workflowAffairId(collaboration.taskId) : conversationAffairId(msg.chatId, session.threadId),
             trigger: {
               source: collaboration ? 'collaboration' : 'message',
               sourceId: msg.messageId,

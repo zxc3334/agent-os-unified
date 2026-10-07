@@ -23,6 +23,7 @@ import type { AppRuntime } from './runtime.js';
 import { assertProductSpecDocuments } from './product-spec-documents.js';
 import { ensureProductSpecSubmission } from './product-spec-submission.js';
 import { runContinuationThroughUnifiedTask } from './unified-task-continuation.js';
+import { workflowAffairId } from './unified-task-runtime.js';
 import type { CliRunResult } from '../cli/types.js';
 
 export async function continueClarificationFlow(options: {
