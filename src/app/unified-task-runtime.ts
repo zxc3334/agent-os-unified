@@ -74,7 +74,7 @@ export interface TaskMemorySourceVersion { id: string; version: number }
 export interface TaskMemoryOperation {
   tool: string;
   operation: 'read' | 'write' | 'delete' | 'feedback';
-  status: 'attempted';
+  status: 'succeeded' | 'failed' | 'unknown';
 }
 export interface TaskUsage {
   totalTokens?: number;
@@ -541,10 +541,11 @@ function sanitizeMemoryOperations(operations: readonly TaskMemoryOperation[]): T
     save_career_interview_feedback: 'feedback',
   };
   const seen = new Set<string>();
-  return operations.flatMap(({ tool, operation }) => {
-    if (allowed[tool] !== operation || seen.has(tool)) return [];
-    seen.add(tool);
-    return [{ tool, operation, status: 'attempted' as const }];
+  return operations.flatMap(({ tool, operation, status }) => {
+    const key = `${tool}:${status}`;
+    if (allowed[tool] !== operation || !['succeeded', 'failed', 'unknown'].includes(status) || seen.has(key)) return [];
+    seen.add(key);
+    return [{ tool, operation, status }];
   }).slice(0, 20);
 }
 function sanitizeMemorySources(sources: readonly TaskMemorySourceVersion[]): TaskMemorySourceVersion[] {

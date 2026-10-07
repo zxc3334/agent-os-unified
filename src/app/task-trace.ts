@@ -12,17 +12,18 @@ const OPERATION_BY_TOOL: Readonly<Record<string, TaskMemoryOperation['operation'
   save_career_interview_feedback: 'feedback',
 };
 
-/** Keep only recognized memory-related app-tool calls; never retain arguments or text. */
+/** Keep only recognized memory-related tool names and terminal status; discard inputs and outputs. */
 export function summarizeMemoryToolCalls(
-  toolCalls: CliRunResult['toolCalls'],
+  outcomes: CliRunResult['toolOutcomes'],
 ): TaskMemoryOperation[] {
-  if (!toolCalls?.length) return [];
+  if (!outcomes?.length) return [];
   const seen = new Set<string>();
-  return toolCalls.flatMap(({ toolName }) => {
+  return outcomes.flatMap(({ toolName, status }) => {
     const tool = normalizeAppToolName(toolName);
     const operation = tool ? OPERATION_BY_TOOL[tool] : undefined;
-    if (!tool || !operation || seen.has(tool)) return [];
-    seen.add(tool);
-    return [{ tool, operation, status: 'attempted' as const }];
+    const key = `${tool}:${status}`;
+    if (!tool || !operation || seen.has(key)) return [];
+    seen.add(key);
+    return [{ tool, operation, status }];
   });
 }

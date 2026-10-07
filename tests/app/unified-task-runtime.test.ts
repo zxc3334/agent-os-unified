@@ -88,7 +88,7 @@ test('one task run passes trusted scope to memory and executor and persists obse
   });
 });
 
-test('trace records selected skill versions, attempted memory operations, duration, and unknown cost without content', async () => {
+test('trace records selected skill versions, memory operation outcomes, duration, and unknown cost without content', async () => {
   await withStore(async (filePath) => {
     let second = 0;
     const start = Date.parse(fixedTime);
@@ -103,8 +103,8 @@ test('trace records selected skill versions, attempted memory operations, durati
             outcome: 'succeeded', result: { secret: 'private result' }, artifacts: [],
             usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
             memoryOperations: [
-              { tool: 'save_personal_memory', operation: 'write', status: 'attempted' },
-              { tool: 'fake_tool', operation: 'delete', status: 'attempted' },
+              { tool: 'save_personal_memory', operation: 'write', status: 'succeeded' },
+              { tool: 'fake_tool', operation: 'delete', status: 'failed' },
             ],
           };
         },
@@ -118,7 +118,7 @@ test('trace records selected skill versions, attempted memory operations, durati
     assert.deepEqual(terminal.skillVersions, [{ id: 'career-interview', version: 1 }]);
     assert.deepEqual(task.traceHistory.find((event) => event.stage === 'context_prepared')?.memorySources, [{ id: 'mem-1', version: 2 }]);
     assert.deepEqual(terminal.memoryOperations, [
-      { tool: 'save_personal_memory', operation: 'write', status: 'attempted' },
+      { tool: 'save_personal_memory', operation: 'write', status: 'succeeded' },
     ]);
     assert.equal(terminal.durationMs, 2_000);
     assert.deepEqual(terminal.usage, { totalTokens: 100, inputTokens: 80, outputTokens: 20, cost: 'unknown' });

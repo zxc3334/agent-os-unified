@@ -26,6 +26,7 @@ test('CLI result preserves a count of failed tool calls without leaking their de
   assert.equal(result.answer, 'Some work completed.');
   assert.equal(result.failedToolCalls, 1);
   assert.equal(result.toolCalls, undefined);
+  assert.deepEqual(result.toolOutcomes, [{ toolName: 'save_memory', status: 'failed' }]);
   assert.equal(JSON.stringify(result).includes('secret'), false);
 });
 
@@ -40,4 +41,17 @@ test('CLI result omits the partial-failure marker when all tool calls succeed', 
   });
   assert.equal(result.answer, 'Done.');
   assert.equal(result.failedToolCalls, undefined);
+  assert.deepEqual(result.toolOutcomes, [{ toolName: 'search', status: 'succeeded' }]);
+});
+
+test('CLI result marks tool calls with no terminal event as unknown without retaining input', { skip: process.platform === 'win32' }, async () => {
+  const result = await runCli({
+    adapter: adapter([
+      { type: 'tool_call', toolUseId: 'tool-use-3', toolName: 'save_memory', input: { content: 'private' } },
+      { type: 'result', answer: 'Finished.' },
+    ]),
+    prompt: 'test', cwd: process.cwd(), signal: new AbortController().signal,
+  });
+  assert.deepEqual(result.toolOutcomes, [{ toolName: 'save_memory', status: 'unknown' }]);
+  assert.equal(JSON.stringify(result.toolOutcomes).includes('private'), false);
 });

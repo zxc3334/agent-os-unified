@@ -69,6 +69,7 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
       NonNullable<CliRunResult['toolCalls']>[number]
     >();
     const failedToolUseIds = new Set<string>();
+    const toolOutcomes = new Map<string, { toolName: string; status: 'succeeded' | 'failed' | 'unknown' }>();
     let finalResult: CliRunResult | undefined;
     let stoppedByToolCall:
       | NonNullable<CliRunResult['toolCalls']>[number]
@@ -103,6 +104,7 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
         }
         if (event.type === 'tool_call') {
           observedToolCalls.set(event.toolUseId, event);
+          toolOutcomes.set(event.toolUseId, { toolName: event.toolName, status: 'unknown' });
           if (
             !stoppedByToolCall
             && stopToolNames.includes(event.toolName)
@@ -116,9 +118,13 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
           }
           continue;
         }
-        if (event.type === 'tool_end' && event.failed) {
-          failedToolUseIds.add(event.toolUseId);
-          observedToolCalls.delete(event.toolUseId);
+        if (event.type === 'tool_end') {
+          const observed = toolOutcomes.get(event.toolUseId);
+          if (observed) toolOutcomes.set(event.toolUseId, { ...observed, status: event.failed ? 'failed' : 'succeeded' });
+          if (event.failed) {
+            failedToolUseIds.add(event.toolUseId);
+            observedToolCalls.delete(event.toolUseId);
+          }
           continue;
         }
         if (event.type === 'result') {
@@ -157,6 +163,7 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
           answer: observedAnswer ?? '',
           sessionId: observedSessionId,
           toolCalls: [stoppedByToolCall],
+          toolOutcomes: [...toolOutcomes.values()],
           ...(failedToolUseIds.size ? { failedToolCalls: failedToolUseIds.size } : {}),
         });
         return;
@@ -192,6 +199,7 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
           input: call.input,
         }));
       }
+      if (toolOutcomes.size > 0) finalResult.toolOutcomes = [...toolOutcomes.values()];
       if (failedToolUseIds.size > 0) finalResult.failedToolCalls = failedToolUseIds.size;
       settled = true;
       finish();

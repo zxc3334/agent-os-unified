@@ -84,6 +84,8 @@ export interface CliRunResult {
     toolName: string;
     input: unknown;
   }>;
+  /** Tool names and execution status only; never includes tool arguments or output. */
+  toolOutcomes?: Array<{ toolName: string; status: 'succeeded' | 'failed' | 'unknown' }>;
   /** Number of tool executions reported failed by the adapter; contents are intentionally omitted. */
   failedToolCalls?: number;
 }

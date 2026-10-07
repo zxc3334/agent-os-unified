@@ -812,7 +812,7 @@ async function startConfiguredBot(
                   outcome: finalResult.failedToolCalls ? 'partial' : 'succeeded',
                   result: finalResult,
                   artifacts: [],
-                  memoryOperations: summarizeMemoryToolCalls(finalResult.toolCalls),
+                  memoryOperations: summarizeMemoryToolCalls(finalResult.toolOutcomes),
                   ...(finalResult.stats ? { usage: {
                     ...(finalResult.stats.totalTokens === undefined ? {} : { totalTokens: finalResult.stats.totalTokens }),
                     ...(finalResult.stats.inputTokens === undefined ? {} : { inputTokens: finalResult.stats.inputTokens }),
