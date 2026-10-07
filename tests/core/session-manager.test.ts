@@ -16,17 +16,20 @@ test('switching engines preserves the Agent OS matter but clears engine-native h
     let { session } = await sessions.resolve(address, 'agy', 'assistant', '/workspace');
     session = await sessions.transition(session.id, 'idle');
     await sessions.setCliSessionId(session.id, 'agy-native-1');
+    session = await sessions.setMemorySpaceIds(session.id, ['job-search']);
 
     const switched = await sessions.resolve(address, 'codex', 'assistant', '/workspace');
     assert.equal(switched.isNew, false);
     assert.equal(switched.session.id, session.id);
     assert.equal(switched.session.cliId, 'codex');
     assert.equal(switched.session.cliSessionId, undefined);
+    assert.deepEqual(switched.session.memorySpaceIds, ['job-search']);
 
     const restored = await SessionManager.open({ store });
     const continued = await restored.resolve(address, 'codex', 'assistant', '/workspace');
     assert.equal(continued.session.id, session.id);
     assert.equal(continued.session.cliSessionId, undefined);
+    assert.deepEqual(continued.session.memorySpaceIds, ['job-search']);
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
