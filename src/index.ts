@@ -647,6 +647,7 @@ async function startConfiguredBot(
             sessionId: result.sessionId,
             stats: undefined,
             toolCalls: undefined,
+            failedToolCalls: undefined,
           }))
         : new UnifiedTaskRuntime({
             store: unifiedTaskStore,
@@ -663,9 +664,7 @@ async function startConfiguredBot(
                   agentOsConfig.defaultProductDeliveryMode,
                   [personalSkillContext, personalTaskMemory.text, careerContext, memoryContext].filter(Boolean).join('\n\n'),
                 );
-                return {
-                outcome: 'succeeded',
-                result: await executeCli(
+                const result = await executeCli(
                   cliAdapter,
                   prompt,
                   session.workspaceDir,
@@ -683,9 +682,12 @@ async function startConfiguredBot(
                     renderProgress();
                   },
                   cliEnv,
-                ),
-                artifacts: [],
-              };
+                );
+                return {
+                  outcome: result.failedToolCalls ? 'partial' : 'succeeded',
+                  result,
+                  artifacts: [],
+                };
               },
             },
           }).run({
@@ -939,6 +941,8 @@ async function startConfiguredBot(
             return;
           }
           const snapshot = progress.snapshot();
+          const failedToolCalls = isCompacting ? 0 : finalResult.failedToolCalls ?? 0;
+          const hasPartialResult = failedToolCalls > 0;
           await cardUpdater.finish(isCompacting
             ? buildSessionNoticeCard({
               title: finalResult.answer ? '暂时无需整理' : '上下文已整理',
@@ -950,8 +954,10 @@ async function startConfiguredBot(
             })
             : buildTaskCard({
               title: taskCardTitle,
-              status: 'success',
-              detail: '执行完成',
+              status: hasPartialResult ? 'partial' : 'success',
+              detail: hasPartialResult
+                ? `部分完成：${failedToolCalls} 个工具调用失败，请核对结果并重试未完成部分。`
+                : '执行完成',
               progress: snapshot,
               answer: finalResult.answer,
               stats: finalResult.stats,
@@ -1008,7 +1014,9 @@ async function startConfiguredBot(
               target: { openId: ownerOpenId, name: '' },
               text: isCompacting
                 ? '上下文整理已完成，请查看上方结果。'
-                : '任务已完成，请查看上方结果。',
+                : hasPartialResult
+                  ? `任务已部分完成（${failedToolCalls} 个工具调用失败），请核对结果后决定是否重试。`
+                  : '任务已完成，请查看上方结果。',
               replyInThread: hasThread,
             });
           }

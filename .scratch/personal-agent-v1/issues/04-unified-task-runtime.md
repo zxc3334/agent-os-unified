@@ -45,3 +45,10 @@
 
 - Added a collaboration runtime test that verifies stable workflow identity, trusted actor/owner propagation, and an empty personal-memory grant. Added service-level tests for dispatch registration, destination identity, workflow metadata handoff, single-use inbox consumption, and removal of pending authorization when Feishu notification fails. These tests exercise the runtime and dispatch service boundaries, but do not replace a live Feishu end-to-end dispatch/worker test.
 - Verification after the tests: `pnpm test` (101/101), `pnpm build`, `git diff --check`.
+
+
+### Partial result visibility
+
+- `runCli` now counts failed tool executions without retaining tool inputs/names in the run summary. Ordinary message and scheduled task adapters map this to `partially_succeeded`; the Feishu task card and completion notification distinguish partial work from full success and tell the user to verify/retry the incomplete portion.
+- Tests exercise failed/successful tool event streams and the partial card label. Remaining: the product-spec retry/continuation UI still needs reconciliation with its original task outcome; this is not a full matter-summary or end-to-end workflow solution.
+- Verification after this slice and the blog-revocation integration: `pnpm test` (107/107), `pnpm build`, `git diff --check`.

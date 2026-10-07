@@ -68,6 +68,7 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
       string,
       NonNullable<CliRunResult['toolCalls']>[number]
     >();
+    const failedToolUseIds = new Set<string>();
     let finalResult: CliRunResult | undefined;
     let stoppedByToolCall:
       | NonNullable<CliRunResult['toolCalls']>[number]
@@ -116,6 +117,7 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
           continue;
         }
         if (event.type === 'tool_end' && event.failed) {
+          failedToolUseIds.add(event.toolUseId);
           observedToolCalls.delete(event.toolUseId);
           continue;
         }
@@ -155,6 +157,7 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
           answer: observedAnswer ?? '',
           sessionId: observedSessionId,
           toolCalls: [stoppedByToolCall],
+          ...(failedToolUseIds.size ? { failedToolCalls: failedToolUseIds.size } : {}),
         });
         return;
       }
@@ -189,6 +192,7 @@ export function runCli(options: RunCliOptions): Promise<CliRunResult> {
           input: call.input,
         }));
       }
+      if (failedToolUseIds.size > 0) finalResult.failedToolCalls = failedToolUseIds.size;
       settled = true;
       finish();
       resolve(finalResult);

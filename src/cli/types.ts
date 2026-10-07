@@ -84,4 +84,6 @@ export interface CliRunResult {
     toolName: string;
     input: unknown;
   }>;
+  /** Number of tool executions reported failed by the adapter; contents are intentionally omitted. */
+  failedToolCalls?: number;
 }

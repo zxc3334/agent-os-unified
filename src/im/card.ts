@@ -11,7 +11,7 @@ import type { ScheduledRun } from '../core/schedule-run-store.js';
 import type { ApprovalFlow } from '../core/approval.js';
 
 export type CardJson = Record<string, unknown>;
-export type TaskStatus = 'running' | 'success' | 'failed' | 'cancelled';
+export type TaskStatus = 'running' | 'success' | 'partial' | 'failed' | 'cancelled';
 
 function formatScheduleTime(value: string): string {
   const date = new Date(value);
@@ -85,6 +85,7 @@ export interface ClarificationCardOptions {
 const STATUS_STYLE = {
   running: { template: 'blue', label: '执行中' },
   success: { template: 'green', label: '已完成' },
+  partial: { template: 'yellow', label: '部分完成' },
   failed: { template: 'red', label: '执行失败' },
   cancelled: { template: 'grey', label: '已取消' },
 } as const;

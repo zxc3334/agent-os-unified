@@ -59,9 +59,8 @@ export async function runScheduledTaskDirectly(options: {
       store: runtime.unifiedTaskStore,
       memoryContext: { prepare: async () => undefined },
       executor: {
-        execute: async ({ signal }) => ({
-          outcome: 'succeeded',
-          result: await runCli({
+        execute: async ({ signal }) => {
+          const result = await runCli({
             adapter,
             prompt,
             cwd: session.workspaceDir,
@@ -78,9 +77,9 @@ export async function runScheduledTaskDirectly(options: {
                 console.log(`[定时] ${task.id} 开始 ${event.label}${'detail' in event && event.detail ? ` ${event.detail}` : ''}`);
               }
             },
-          }),
-          artifacts: [],
-        }),
+          });
+          return { outcome: result.failedToolCalls ? 'partial' : 'succeeded', result, artifacts: [] };
+        },
       },
     }).run({
       trusted: { actorId: task.creatorOpenId, ownerId: task.creatorOpenId },
