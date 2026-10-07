@@ -17,6 +17,9 @@ export type SlashCommand =
   | { name: 'career'; action: 'feedback'; resumeId: string; summary: string; weakPoint: string }
   | { name: 'career'; action: 'review'; learningId: string; score: number }
   | { name: 'career'; action: 'due' }
+  | { name: 'career'; action: 'material-add'; spaceId: string; title: string; content: string }
+  | { name: 'career'; action: 'material-search'; query: string }
+  | { name: 'career'; action: 'material-revoke'; materialId: string }
   | { name: 'task'; action: 'recent' }
   | { name: 'task'; action: 'trace'; taskId: string }
   | { name: 'daily'; action: 'list' }
@@ -104,6 +107,12 @@ export function parseCommand(text: string): SlashCommand | undefined {
     const args = careerMatch[1]?.trim() ?? '';
     if (!args || args === 'status') return { name: 'career', action: 'status' };
     if (args === 'due') return { name: 'career', action: 'due' };
+    const materialAdd = /^material add ([a-zA-Z0-9_-]{1,100}) ([^\n:]{1,300})\s*::\s*([\s\S]+)$/.exec(args);
+    if (materialAdd?.[3]?.trim()) return { name: 'career', action: 'material-add', spaceId: materialAdd[1]!, title: materialAdd[2]!.trim(), content: materialAdd[3]!.trim() };
+    const materialSearch = /^material search ([\s\S]+)$/.exec(args);
+    if (materialSearch?.[1]?.trim()) return { name: 'career', action: 'material-search', query: materialSearch[1].trim() };
+    const materialRevoke = /^material revoke ([a-zA-Z0-9_-]{1,100})$/.exec(args);
+    if (materialRevoke) return { name: 'career', action: 'material-revoke', materialId: materialRevoke[1]! };
     const evidence = /^(evidence)\s+(confirmed|unconfirmed)\s+([\s\S]+)$/.exec(args);
     if (evidence?.[3]?.trim()) return { name: 'career', action: 'evidence', status: evidence[2] as 'confirmed' | 'unconfirmed', claim: evidence[3].trim() };
     const role = /^role\s+([\s\S]+)$/.exec(args);

@@ -5,6 +5,8 @@ import { join } from 'node:path';
 import { test } from 'node:test';
 import { handleSessionCommand } from '../../src/app/command-handler.js';
 import { JsonCareerPreparation } from '../../src/core/career-preparation.js';
+import { PersonalMemoryStore } from '../../src/core/personal-memory.js';
+import { JsonTextMaterialLibrary } from '../../src/core/text-materials.js';
 import { parseCommand } from '../../src/core/command-parser.js';
 import { CareerReviewSchedulerAdapter } from '../../src/core/review-scheduler.js';
 
@@ -26,6 +28,7 @@ test('career commands enforce explicit evidence and resume approval, and track m
   const ctx = await setup();
   try {
     assert.deepEqual(parseCommand('/career role Backend Intern | Python;Distributed systems'), { name: 'career', action: 'role', title: 'Backend Intern', requirements: ['Python', 'Distributed systems'] });
+    assert.deepEqual(parseCommand('/career material search caching'), { name: 'career', action: 'material-search', query: 'caching' });
     assert.deepEqual(parseCommand('/career evidence confirmed Built a queue worker'), {
       name: 'career', action: 'evidence', status: 'confirmed', claim: 'Built a queue worker',
     });
@@ -118,6 +121,44 @@ test('owner can list a bounded set of due career reviews in private chat', async
     assert.match(reply, /Weak point 0/);
     assert.match(reply, /Weak point 4/);
     assert.doesNotMatch(reply, /Weak point 5/);
+  } finally {
+    await rm(ctx.directory, { recursive: true, force: true });
+  }
+});
+
+test('career material commands enforce matter scope and preserve line citations until revocation', async () => {
+  const ctx = await setup();
+  try {
+    const personalMemoryStore = new PersonalMemoryStore({ directory: join(ctx.directory, 'memory'), ownerId: 'owner' });
+    const careerSpace = await personalMemoryStore.createSpace('求职');
+    const otherSpace = await personalMemoryStore.createSpace('阅读');
+    const textMaterials = new JsonTextMaterialLibrary(join(ctx.directory, 'materials.json'), 'owner');
+    const add = parseCommand(`/career material add ${careerSpace.id} Project Alpha :: Cache invalidation reduced stale reads.`);
+    assert.deepEqual(add, { name: 'career', action: 'material-add', spaceId: careerSpace.id, title: 'Project Alpha', content: 'Cache invalidation reduced stale reads.' });
+    await handleSessionCommand({ ...ctx.options, personalMemoryStore, textMaterials, command: add });
+    const materialId = ctx.replies.at(-1)!.match(/\[([a-f0-9-]+)\]/)?.[1];
+    assert.ok(materialId);
+    await handleSessionCommand({ ...ctx.options, personalMemoryStore, textMaterials, command: parseCommand('/career material search stale reads') });
+    assert.match(ctx.replies.at(-1)!, new RegExp(`${careerSpace.id} L1`));
+    assert.match(ctx.replies.at(-1)!, /Cache invalidation reduced stale reads/);
+
+    await handleSessionCommand({
+      ...ctx.options, personalMemoryStore, textMaterials,
+      session: { ...ctx.options.session, memorySpaceIds: [otherSpace.id] },
+      command: parseCommand('/career material search stale reads'),
+    });
+    assert.equal(ctx.replies.at(-1), '授权范围内没有找到匹配的参考资料。');
+    await handleSessionCommand({
+      ...ctx.options, personalMemoryStore, textMaterials,
+      session: { ...ctx.options.session, memorySpaceIds: [otherSpace.id] },
+      command: parseCommand(`/career material revoke ${materialId}`),
+    });
+    assert.ok(await textMaterials.readExcerpt(materialId!, { start: 1, end: 1 }, [careerSpace.id]));
+    assert.match(ctx.replies.at(-1)!, /没有找到授权范围/);
+    await handleSessionCommand({ ...ctx.options, personalMemoryStore, textMaterials, command: parseCommand(`/career material revoke ${materialId}`) });
+    assert.match(ctx.replies.at(-1)!, /已撤权/);
+    assert.equal(await textMaterials.readExcerpt(materialId!, { start: 1, end: 1 }, [careerSpace.id]), undefined);
+    assert.deepEqual(textMaterials.search('stale reads', [careerSpace.id]), []);
   } finally {
     await rm(ctx.directory, { recursive: true, force: true });
   }

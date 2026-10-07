@@ -28,3 +28,7 @@
 - Follow-up: learning records now persist review schedule state and are exposed through `CareerReviewSchedulerAdapter`. Owner-only `/career due` lists at most five due records in private chat; `/career review <ID> <0-5>` records the review. The group scheduler remains memory-card-only, so career feedback is not sent to a group.
 - Verification after scheduler and command integration: `pnpm test` (84/84), `pnpm build`, `git diff --check`.
 - Remaining: natural-language/tool workflow, career-context material retrieval, natural-language mock interview execution, and automatic private delivery for due review items. This ticket is not complete.
+
+- Follow-up: added owner-DM-only `/career material add <space> <title> :: <text>`, `material search <query>`, and `material revoke <id>`. Storage remains separate from personal claims, retrieval requires current matter space authorization and returns line/version citations, and revoked content is removed from future search/read paths. Career-related prompts receive at most three matching authorized excerpts, explicitly marked as reference data rather than confirmed experience.
+- Verification after material integration: `pnpm test` (90/90), `pnpm build`, `git diff --check`.
+- Remaining: natural-language mock interview execution, project-record lookup beyond explicitly added text materials, automatic private review delivery, and conversational workflow replacing slash-command setup.

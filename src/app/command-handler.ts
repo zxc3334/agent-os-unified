@@ -23,6 +23,7 @@ import type { MemoryExtractionWorker } from "../core/memory-worker.js";
 import { PERSONAL_SKILLS, type JsonPersonalSkillRegistry } from "../core/personal-skills.js";
 import type { JsonCareerPreparation } from "../core/career-preparation.js";
 import type { CareerReviewSchedulerAdapter } from "../core/review-scheduler.js";
+import type { JsonTextMaterialLibrary } from "../core/text-materials.js";
 import type { JsonDailyRecordsReminders } from "../core/daily-records.js";
 import { resolveRelativeDue } from "../core/daily-records.js";
 import type { PersonalReminderScheduler } from "./personal-reminder-scheduler.js";
@@ -47,6 +48,7 @@ export async function handleSessionCommand(options: {
   personalSkills?: JsonPersonalSkillRegistry;
   careerPreparation?: JsonCareerPreparation;
   careerReviewScheduler?: CareerReviewSchedulerAdapter;
+  textMaterials?: JsonTextMaterialLibrary;
   dailyRecords?: JsonDailyRecordsReminders;
   personalReminderScheduler?: PersonalReminderScheduler;
 }): Promise<CommandOutcome> {
@@ -68,6 +70,7 @@ export async function handleSessionCommand(options: {
     personalSkills,
     careerPreparation,
     careerReviewScheduler,
+    textMaterials,
     dailyRecords,
     personalReminderScheduler,
   } = options;
@@ -243,9 +246,37 @@ export async function handleSessionCommand(options: {
           `证据：${evidence.length ? evidence.map((item) => `${item.status === "confirmed" ? "✅" : "○"} ${safe(item.claim)} [${item.id}]`).join("；") : "尚未记录"}`,
           `当前简历版本：${resumes ? `${resumes.id}（岗位 ${resumes.roleId}，${resumes.claims.length} 条主张）` : "尚未批准"}`,
           `待复习反馈：${learning.filter((item) => item.reviewStatus === "needs-review").slice(0, 5).map((item) => `${safe(item.weakPoint)} [${item.id}]`).join("；") || "无"}`,
-          "命令：/career role <岗位> | <要求1;要求2>；/career evidence confirmed|unconfirmed <内容>；/career resume <岗位ID> <证据ID,...>；/career approve <版本ID>；/career export <版本ID>；/career feedback <版本ID> <表现> | <薄弱点>；/career due 查看待复习项；/career review <反馈ID> <0-5>",
+          "命令：/career role <岗位> | <要求1;要求2>；/career evidence confirmed|unconfirmed <内容>；/career resume <岗位ID> <证据ID,...>；/career approve <版本ID>；/career export <版本ID>；/career feedback <版本ID> <表现> | <薄弱点>；/career due 查看待复习项；/career review <反馈ID> <0-5>；/career material add <空间ID> <标题> :: <正文>；/career material search <查询>；/career material revoke <资料ID>",
         ];
         await bot.reply(msg.messageId, lines.join("\n"), hasThread);
+      } else if (command.action === "material-add") {
+        if (!textMaterials || !personalMemoryStore) throw new Error("资料库暂不可用");
+        const spaces = await personalMemoryStore.listSpaces();
+        if (!spaces.some((space) => space.id === command.spaceId)) throw new Error("没有这个个人记忆空间");
+        if (session.memorySpaceIds !== undefined && !session.memorySpaceIds.includes(command.spaceId)) throw new Error("当前事项没有授权这个空间；请先用 /memory scope <空间ID> 修改范围");
+        const material = await textMaterials.add({
+          operationId: `message:${msg.messageId}`, spaceId: command.spaceId, title: command.title,
+          content: command.content, receivedAt: msg.receivedAt,
+        });
+        await bot.reply(msg.messageId, `已保存参考资料「${safe(material.title)}」[${material.id}] 到空间 ${material.spaceId}；资料不等同于已确认的个人事实。`, hasThread);
+      } else if (command.action === "material-search") {
+        if (!textMaterials || !personalMemoryStore) throw new Error("资料库暂不可用");
+        const spaces = await personalMemoryStore.listSpaces();
+        const authorizedSpaceIds = session.memorySpaceIds === undefined
+          ? spaces.map((space) => space.id)
+          : spaces.map((space) => space.id).filter((id) => session.memorySpaceIds?.includes(id));
+        const matches = textMaterials.search(command.query, authorizedSpaceIds, 5);
+        await bot.reply(msg.messageId, matches.length
+          ? matches.map((item) => `「${safe(item.title)}」[${item.materialId}] ${item.spaceId} L${item.startLine}：${safe(item.text, 900)}`).join("\n")
+          : "授权范围内没有找到匹配的参考资料。", hasThread);
+      } else if (command.action === "material-revoke") {
+        if (!textMaterials || !personalMemoryStore) throw new Error("资料库暂不可用");
+        const spaces = await personalMemoryStore.listSpaces();
+        const authorizedSpaceIds = session.memorySpaceIds === undefined
+          ? spaces.map((space) => space.id)
+          : spaces.map((space) => space.id).filter((id) => session.memorySpaceIds?.includes(id));
+        const revoked = await textMaterials.revoke(command.materialId, msg.receivedAt, authorizedSpaceIds);
+        await bot.reply(msg.messageId, revoked ? "参考资料已撤权，后续检索不再返回原文。" : "没有找到授权范围内的有效参考资料。", hasThread);
       } else if (command.action === "due") {
         if (!careerReviewScheduler) throw new Error("复习调度暂不可用");
         const due = (await careerReviewScheduler.listDueReviews()).slice(0, 5);
@@ -429,7 +460,7 @@ export async function handleSessionCommand(options: {
         "/memory spaces 查看个人记忆空间；/memory scope <空间ID|all> 设置本事项的记忆范围",
         "/memory extract 从当前项目待处理对话中恢复并执行学习记忆提取",
         "/skills 查看个人能力包；/skills enable|disable <id> 管理能力包",
-        "/career 查看求职准备；支持保存事实、岗位、简历草案审批和模拟面试反馈",
+        "/career 查看求职准备；支持证据/简历/面试反馈、待复习项，以及 material add|search|revoke 参考资料管理",
         "/daily add daily|reading|exploration <内容> 记录生活；/daily list 回顾最近记录；/daily recap <开始日期> <结束日期>",
         "/reminder add <今天/明天/后天 时间> :: <内容>；/reminder list；/reminder cancel|retry <ID>",
         "/memory confirm <id>、/memory correct <id> <内容>、/memory reject <id>、/memory forget <id>",
