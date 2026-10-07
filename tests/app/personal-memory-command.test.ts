@@ -26,7 +26,7 @@ async function setup() {
   } as never;
   const options = {
     runtime: {}, scheduler: {}, config: {}, bot,
-    msg: { senderOpenId: 'owner-open-id', messageId: 'test-message' },
+    msg: { senderOpenId: 'owner-open-id', messageId: 'test-message', receivedAt: '2026-10-07T12:00:00.000Z' },
     session: { status: 'idle' }, cliAdapter: {}, isNew: false, hasThread: false,
     personalMemoryStore: store, trustedOwnerOpenId: 'owner-open-id',
   } as never;
@@ -70,13 +70,13 @@ test('only the configured actor can mutate, and confirm/correct/reject/forget pe
   const ctx = await setup();
   try {
     await handleSessionCommand({
-      ...ctx.options, msg: { senderOpenId: 'attacker', messageId: 'x' },
+      ...ctx.options, msg: { senderOpenId: 'attacker', messageId: 'x', receivedAt: '2026-10-07T12:00:00.000Z' },
       command: parseCommand(`/memory confirm ${ctx.entry.id}`),
     });
     assert.match(ctx.replies.at(-1)!, /仅限配置的所有者/);
     assert.equal((await ctx.store.get(ctx.entry.id, { authorizedSpaceIds: [ctx.space.id] }))?.confidence, 'inferred');
 
-    const msg = { senderOpenId: 'owner-open-id', messageId: 'x' };
+    const msg = { senderOpenId: 'owner-open-id', messageId: 'x', receivedAt: '2026-10-07T12:00:00.000Z' };
     await handleSessionCommand({ ...ctx.options, msg, command: parseCommand(`/memory confirm ${ctx.entry.id}`) });
     assert.equal((await ctx.store.get(ctx.entry.id, { authorizedSpaceIds: [ctx.space.id] }))?.confidence, 'user_confirmed');
     await handleSessionCommand({ ...ctx.options, msg, command: parseCommand(`/memory correct ${ctx.entry.id} 已核实的新内容`) });

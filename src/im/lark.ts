@@ -10,6 +10,8 @@ import type { CardJson } from './card.js';
 
 export interface IncomingMessage {
   messageId: string;
+  /** Trusted source event time from Feishu, normalized to ISO-8601. */
+  receivedAt: string;
   chatId: string;
   chatType: string;
   messageType: string;
@@ -55,6 +57,19 @@ export interface BotIdentity {
 export const FEISHU_TEXT_LIMIT = 3_000;
 export const FEISHU_MENTION_LIMIT = 1_200;
 export const FEISHU_COMMENT_LIMIT = 1_000;
+
+export function normalizeMessageReceivedAt(value: unknown, fallback = new Date()): string {
+  let timestamp = Number.NaN;
+  if (typeof value === 'number' || (typeof value === 'string' && /^\d+$/.test(value))) {
+    timestamp = Number(value);
+  } else if (typeof value === 'string') {
+    timestamp = Date.parse(value);
+  }
+  const date = new Date(timestamp);
+  return Number.isFinite(timestamp) && timestamp > 0 && Number.isFinite(date.getTime())
+    ? date.toISOString()
+    : fallback.toISOString();
+}
 
 export function fitFeishuText(text: string, maxLength: number): string {
   const characters = Array.from(text);
@@ -402,6 +417,7 @@ export function startBot(opts: BotOptions): Bot {
       const m = data.message;
       const msg: IncomingMessage = {
         messageId: m.message_id,
+        receivedAt: normalizeMessageReceivedAt(m.create_time),
         chatId: m.chat_id,
         chatType: m.chat_type,
         messageType: m.message_type,

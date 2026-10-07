@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 
 /** Trigger kinds intentionally describe transport/workflow, not authority. */
@@ -284,8 +284,21 @@ export class JsonUnifiedTaskStore implements UnifiedTaskStore {
       else tasks[index] = snapshot;
       await mkdir(dirname(this.filePath), { recursive: true });
       const temporaryPath = `${this.filePath}.${randomUUID()}.tmp`;
-      await writeFile(temporaryPath, `${JSON.stringify(tasks, null, 2)}\n`, 'utf8');
-      await rename(temporaryPath, this.filePath);
+      const handle = await open(temporaryPath, 'wx', 0o600);
+      try {
+        await handle.writeFile(`${JSON.stringify(tasks, null, 2)}\n`, 'utf8');
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      try {
+        await rename(temporaryPath, this.filePath);
+        const directoryHandle = await open(dirname(this.filePath), 'r');
+        try { await directoryHandle.sync(); } finally { await directoryHandle.close(); }
+      } catch (error) {
+        await unlink(temporaryPath).catch(() => undefined);
+        throw error;
+      }
     };
     this.writeQueue = this.writeQueue.then(write, write);
     return this.writeQueue;

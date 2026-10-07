@@ -22,3 +22,9 @@
 - Tests use a real temporary directory and verify persistence after reopening, trusted-scope handling, progress/artifacts, defensive copies, and distinguishable cancellation/failure/partial outcomes.
 - Verification: `pnpm test` (26/26), `pnpm build`, and `git diff --check` pass.
 - Remaining: wire the runtime through existing message, schedule, collaboration, approval/clarification, card-action, and document-comment entry points; preserve per-affair native sessions and summaries. These production adapters are not yet implemented, so this ticket remains in progress.
+
+### Adapter wiring update
+
+- The ordinary Feishu message execution path and scheduled CLI execution now both enter `UnifiedTaskRuntime` with trusted actor/owner, source type/time, affair/session identity, a minimal stored input reference, cancellation signal, and persisted result. Full message text remains out of the task trace.
+- The shared runtime store is attached to `AppRuntime`; state files are written with private file permissions and fsync/atomic rename.
+- Remaining adapters (collaboration, clarification/approval continuation, card actions, and document comments) and end-to-end route tests still keep this ticket in progress.

@@ -21,3 +21,4 @@
 - Unit tests cover multiple candidates, partial failure/retry, high-water freezing, restart recovery, and the legacy unrelated-plan cursor hook.
 - `pnpm test` (18 tests) and `pnpm build` pass.
 - Remaining: connect the dedicated batch path to an explicit extraction schedule/trigger; the existing generic scheduled-task runner is intentionally no longer allowed to advance cursors without committed source completion.
+- Dialogue and task trigger timestamps now use the normalized Feishu `create_time` when available, with host receipt time as fallback; unit-tested.

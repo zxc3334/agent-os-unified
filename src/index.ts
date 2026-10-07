@@ -90,6 +90,8 @@ import { Scheduler } from './app/scheduler.js';
 import { startScheduleApi } from './app/schedule-api.js';
 import { startScheduleFileWatcher } from './app/schedule-watcher.js';
 import type { AppRuntime, BotRuntime } from './app/runtime.js';
+import { JsonUnifiedTaskStore, UnifiedTaskRuntime } from './app/unified-task-runtime.js';
+import type { CliRunResult } from './cli/types.js';
 
 const botConfigPath = resolve(
   process.env.BOTS_CONFIG ?? join('config', 'bots.json'),
@@ -132,6 +134,7 @@ const productSpecFlows = new JsonProductSpecFlowStore(
 const approvalFlows = new JsonApprovalFlowStore(
   join('data', 'approval-flows.json'),
 );
+const unifiedTaskStore = new JsonUnifiedTaskStore(join('data', 'unified-tasks.json'));
 const processedDocumentCommentEvents = new Set<string>();
 const documentCommentQueues = new Map<string, Promise<void>>();
 const MAX_REMEMBERED_DOCUMENT_COMMENT_EVENTS = 1_000;
@@ -146,6 +149,7 @@ const runtime: AppRuntime = {
   clarificationFlows,
   productSpecFlows,
   approvalFlows,
+  unifiedTaskStore,
 };
 function persistBotIdentities(): void {
   const identities = Object.fromEntries(
@@ -342,19 +346,23 @@ async function startConfiguredBot(
       }
       const memoryContext = await formatMemoryPromptContext(config.project)
         .catch(() => undefined);
+      let authorizedPersonalSpaceIds: string[] = [];
       const personalMemoryContext = personalMemoryStore
         && msg.chatType === 'p2p'
         && msg.senderOpenId === configuredOwnerOpenId
         ? await personalMemoryStore.listSpaces()
-          .then((spaces) => preparePersonalMemoryContext(personalMemoryStore, {
-            actorId: msg.senderOpenId,
-            trustedOwnerId: configuredOwnerOpenId,
-            directMessage: true,
-            query: taskText,
-            authorizedSpaceIds: spaces.map((space) => space.id),
-            maxEntries: 5,
-            maxCharacters: 3_000,
-          }))
+          .then((spaces) => {
+            authorizedPersonalSpaceIds = spaces.map((space) => space.id);
+            return preparePersonalMemoryContext(personalMemoryStore, {
+              actorId: msg.senderOpenId,
+              trustedOwnerId: configuredOwnerOpenId,
+              directMessage: true,
+              query: taskText,
+              authorizedSpaceIds: spaces.map((space) => space.id),
+              maxEntries: 5,
+              maxCharacters: 3_000,
+            });
+          })
           .then((context) => context.text)
           .catch((error) => {
             console.warn('[个人记忆] 相关上下文读取失败:', (error as Error).message);
@@ -557,25 +565,56 @@ async function startConfiguredBot(
             stats: undefined,
             toolCalls: undefined,
           }))
-        : executeCli(
-            cliAdapter,
-            prompt,
-            session.workspaceDir,
-            session.cliSessionId,
-            run.signal,
-            ['request_approval'],
-            (event) => {
-              if (
-                event.type !== 'tool_start' &&
-                event.type !== 'tool_end' &&
-                event.type !== 'context'
-              )
-                return;
-              progress.accept(event);
-              renderProgress();
+        : new UnifiedTaskRuntime<void>({
+            store: unifiedTaskStore,
+            memoryContext: { prepare: async () => undefined },
+            executor: {
+              execute: async ({ signal }) => ({
+                outcome: 'succeeded',
+                result: await executeCli(
+                  cliAdapter,
+                  prompt,
+                  session.workspaceDir,
+                  session.cliSessionId,
+                  signal,
+                  ['request_approval'],
+                  (event) => {
+                    if (
+                      event.type !== 'tool_start' &&
+                      event.type !== 'tool_end' &&
+                      event.type !== 'context'
+                    )
+                      return;
+                    progress.accept(event);
+                    renderProgress();
+                  },
+                  cliEnv,
+                ),
+                artifacts: [],
+              }),
             },
-            cliEnv,
-          );
+          }).run({
+            trusted: { actorId: msg.senderOpenId, ownerId: ownerOpenId },
+            affairId: `${config.id}:${msg.chatId}:${session.threadId}`,
+            trigger: {
+              source: collaboration ? 'collaboration' : 'message',
+              sourceId: msg.messageId,
+              occurredAt: msg.receivedAt,
+            },
+            authorizedMemorySpaceIds: authorizedPersonalSpaceIds,
+            // Keep the durable task record minimal; raw prompt text stays in the
+            // existing execution/session path rather than the task trace.
+            input: { messageId: msg.messageId, botId: config.id, sessionId: session.id, cliId: cliAdapter.id },
+            signal: run.signal,
+          }).then((task) => {
+            if (task.status === 'failed') throw new Error(task.error ?? 'Task execution failed');
+            if (task.status === 'cancelled') {
+              const error = new Error('Task cancelled');
+              error.name = 'AbortError';
+              throw error;
+            }
+            return task.result as CliRunResult;
+          });
 
       void execution
         .then(async (result) => {
@@ -853,7 +892,7 @@ async function startConfiguredBot(
               threadId: msg.threadId || msg.messageId,
               user: taskText,
               bot: finalResult.answer,
-              at: new Date().toISOString(),
+              at: msg.receivedAt,
             });
           }
           if (!collaboration) {

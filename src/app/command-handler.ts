@@ -108,7 +108,7 @@ export async function handleSessionCommand(options: {
           source: {
             sourceId: msg.messageId,
             actorId: trustedOwnerOpenId,
-            receivedAt: new Date().toISOString(),
+            receivedAt: msg.receivedAt,
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
             excerpt: command.content,
           },

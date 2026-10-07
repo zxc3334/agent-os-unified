@@ -22,3 +22,4 @@
 - Added temporary-storage tests for owner/DM gating and space filtering.
 - Verification: `pnpm test` (27/27) and `pnpm build` pass.
 - Remaining: expose authorized detail lookup through the unified host/MCP seam, add explicit space/affair selection and enabled skill packs, and wire this context through scheduled/continuation paths.
+- The shared task runtime now wraps the ordinary Feishu message and scheduled CLI execution paths. The personal-memory snapshot is currently prepared by the message adapter; the runtime memory provider is not yet shared across continuation handlers.

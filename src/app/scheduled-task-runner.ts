@@ -7,6 +7,8 @@ import { resolve } from 'node:path';
 import type { AppRuntime } from './runtime.js';
 import type { ScheduledTask } from '../core/schedule.js';
 import { markSessionIdle } from './session-view.js';
+import { UnifiedTaskRuntime } from './unified-task-runtime.js';
+import type { CliRunResult } from '../cli/types.js';
 
 export async function runScheduledTaskDirectly(options: {
   runtime: AppRuntime;
@@ -54,31 +56,44 @@ export async function runScheduledTaskDirectly(options: {
   const adapter = getCliAdapter(session.cliId);
   const run = new AbortController();
   try {
-    const result = await runCli({
-      adapter,
-      prompt,
-      cwd: session.workspaceDir,
-      // 定时任务**不续跑**历史会话，每次全新开一个。
-      //
-      // 为什么：提取靠 data/dialogues/.cursor.json 做增量，本身是无状态批处理，
-      // 不需要会话记忆。而续跑会让一次跑偏的会话永久污染后续每一轮
-      // （实际发生过：同一个会话被续跑 8 次，从头到尾都在排查故障，0 条记忆）。
-      sessionId: undefined,
+    const taskExecution = await new UnifiedTaskRuntime<void>({
+      store: runtime.unifiedTaskStore,
+      memoryContext: { prepare: async () => undefined },
+      executor: {
+        execute: async ({ signal }) => ({
+          outcome: 'succeeded',
+          result: await runCli({
+            adapter,
+            prompt,
+            cwd: session.workspaceDir,
+            // 定时任务不续跑 CLI 历史会话，避免旧任务上下文污染新一轮。
+            sessionId: undefined,
+            signal,
+            env: {
+              AGENT_OS_CHAT_ID: task.chatId,
+              AGENT_OS_OWNER_OPEN_ID: task.creatorOpenId,
+              AGENT_OS_HOME: resolve(import.meta.dirname, '..', '..'),
+            },
+            onEvent: (event) => {
+              if (event.type === 'tool_start') {
+                console.log(`[定时] ${task.id} 开始 ${event.label}${'detail' in event && event.detail ? ` ${event.detail}` : ''}`);
+              }
+            },
+          }),
+          artifacts: [],
+        }),
+      },
+    }).run({
+      trusted: { actorId: task.creatorOpenId, ownerId: task.creatorOpenId },
+      affairId: `schedule:${task.id}`,
+      trigger: { source: 'schedule', sourceId: `${task.id}:${scheduledFor}`, occurredAt: scheduledFor },
+      authorizedMemorySpaceIds: [],
+      input: { scheduleId: task.id, targetBotId: target.id },
       signal: run.signal,
-      env: {
-        AGENT_OS_CHAT_ID: task.chatId,
-        AGENT_OS_OWNER_OPEN_ID: task.creatorOpenId,
-        // 与普通消息路径保持一致：MCP 垫片靠它找到本安装目录。
-        // 不注入的话垫片会回退到其它 Agent OS，导致工具集过期（如缺 save_memory）。
-        // 本文件在 src/app/ 下，所以要退两级才到项目根（index.ts 在 src/ 下只需一级）
-        AGENT_OS_HOME: resolve(import.meta.dirname, '..', '..'),
-      },
-      onEvent: (event) => {
-        if (event.type === 'tool_start') {
-          console.log(`[定时] ${task.id} 开始 ${event.label}${'detail' in event && event.detail ? ` ${event.detail}` : ''}`);
-        }
-      },
     });
+    if (taskExecution.status === 'failed') throw new Error(taskExecution.error ?? 'Scheduled task failed');
+    if (taskExecution.status === 'cancelled') throw new Error('Scheduled task cancelled');
+    const result = taskExecution.result as CliRunResult;
     // 不把 CLI 会话 id 存回会话记录：定时任务每次都是全新会话，
     // 存回去只会让下一轮又续跑上一个（第一次已踩坑）。
     if (result.stats?.contextWindowTokens) {
