@@ -141,11 +141,10 @@ test('unfinished frozen batch and candidate completion survive worker restart', 
   });
 });
 
-test('unrelated schedule completion cannot advance an extraction cursor', async () => {
+test('an incomplete extraction source cannot advance the cursor via generic advancement', async () => {
   await withDataRoot(async () => {
     await appendDialogue(record('project-a', 'message-1'));
-    // This is the legacy task-runner completion hook: without an explicitly
-    // completed extraction source it must be a no-op, even when called repeatedly.
+    // Defensive storage invariant: no caller can move past uncommitted sources.
     await advanceCursors(['project-a']);
     await advanceCursors(['project-a']);
     assert.equal((await readCursor())['project-a'] ?? 0, 0);

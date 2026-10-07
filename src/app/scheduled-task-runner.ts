@@ -2,7 +2,6 @@ import { runCli } from '../cli/runner.js';
 import { getCliAdapter } from '../cli/registry.js';
 import { buildBotPrompt } from '../core/bot-registry.js';
 import { persistMemorySubmission } from '../core/persist-memory.js';
-import { advanceCursors, listDialogueProjects, pendingDialogues } from '../core/dialogue-store.js';
 import { resolve } from 'node:path';
 import type { AppRuntime } from './runtime.js';
 import type { ScheduledTask } from '../core/schedule.js';
@@ -112,23 +111,9 @@ export async function runScheduledTaskDirectly(options: {
     } catch (error) {
       console.error(`[定时] ${task.id} 记忆落盘失败:`, (error as Error).message);
     }
-    // 推进游标：任务成功后，把「有新增对话」的项目的游标推到当前条数。
-    // 必须成功后才推进 —— 失败时推进会永久跳过未处理的对话。
-    // 「读了但没有值得记的」也算处理完，否则下次会重复读同一批。
-    try {
-      const projects = await listDialogueProjects();
-      const withPending: string[] = [];
-      for (const project of projects) {
-        const { records } = await pendingDialogues(project);
-        if (records.length > 0) withPending.push(project);
-      }
-      if (withPending.length > 0) {
-        const cursors = await advanceCursors(withPending);
-        console.log(`[定时] ${task.id} 游标已推进: ${withPending.map((p) => `${p}=${cursors[p]}`).join(' ')}`);
-      }
-    } catch (error) {
-      console.error(`[定时] ${task.id} 游标推进失败:`, (error as Error).message);
-    }
+    // Ordinary scheduled work is not a memory-extraction acknowledgement.
+    // Extraction cursors advance only inside MemoryExtractionWorker after every
+    // frozen source and candidate has been durably processed.
     console.log(`[定时] ${task.id} 直接执行完成`);
     return { sessionId: result.sessionId };
   } finally {

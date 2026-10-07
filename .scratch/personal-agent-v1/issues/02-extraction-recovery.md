@@ -19,6 +19,7 @@
 
 - Added persistent frozen-batch primitives and a restart-safe `MemoryExtractionWorker.processDialogueBatch` path with stable per-candidate operation IDs.
 - Unit tests cover multiple candidates, partial failure/retry, high-water freezing, restart recovery, and the legacy unrelated-plan cursor hook.
-- `pnpm test` (18 tests) and `pnpm build` pass.
-- Remaining: connect the dedicated batch path to an explicit extraction schedule/trigger; the existing generic scheduled-task runner is intentionally no longer allowed to advance cursors without committed source completion.
+- The ordinary scheduled-task runner no longer advances dialogue extraction cursors; only `MemoryExtractionWorker.processDialogueBatch` advances after committed frozen sources. Generic cursor advancement remains defensive against incomplete batches.
+- Verification: `pnpm test` (33 tests) and `pnpm build` pass.
+- Remaining: connect the dedicated batch path to an explicit extraction schedule/trigger.
 - Dialogue and task trigger timestamps now use the normalized Feishu `create_time` when available, with host receipt time as fallback; unit-tested.
