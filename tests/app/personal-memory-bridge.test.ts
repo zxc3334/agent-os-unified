@@ -12,15 +12,17 @@ async function withBridge(run: (options: {
   bridge: PersonalMemoryToolBridge;
   store: PersonalMemoryStore;
   daily: JsonDailyRecordsReminders;
+  invalidated: string[];
   baseUrl: string;
 }) => Promise<void>) {
   const directory = await mkdtemp(join(tmpdir(), 'agent-os-memory-bridge-'));
   const store = new PersonalMemoryStore({ directory, ownerId: 'trusted-owner' });
   const daily = new JsonDailyRecordsReminders(join(directory, 'daily.json'));
-  const bridge = new PersonalMemoryToolBridge(store, daily);
+  const invalidated: string[] = [];
+  const bridge = new PersonalMemoryToolBridge(store, daily, undefined, (record) => invalidated.push(record.id));
   const port = await bridge.start();
   try {
-    await run({ bridge, store, daily, baseUrl: `http://127.0.0.1:${port}/api/personal-memory/remember` });
+    await run({ bridge, store, daily, invalidated, baseUrl: `http://127.0.0.1:${port}/api/personal-memory/remember` });
   } finally {
     await bridge.close();
     await rm(directory, { recursive: true, force: true });
@@ -203,6 +205,64 @@ test('owner-only tools capture dated records, schedule reminders from trusted re
         body: JSON.stringify({ from: '2026-10-07', through: '2026-10-07', spaceId: 'unauthorized' }),
       });
       assert.equal(denied.status, 403);
+    } finally { lease.release(); }
+  });
+});
+
+
+test('natural-language record deletion requires explicit non-negated owner intent and authorized record scope', async () => {
+  await withBridge(async ({ bridge, daily, invalidated, baseUrl }) => {
+    const record = daily.createRecord({
+      operationId: 'delete-target', kind: 'reading', date: '2026-10-07', content: 'Private reading note',
+      userView: 'My private opinion', scopeId: 'reading-space',
+      source: { sourceId: 'original', actorId: 'trusted-owner', receivedAt: '2026-10-07T12:00:00.000Z', timezone: 'Asia/Shanghai' },
+    });
+    const route = baseUrl.replace('/api/personal-memory/remember', '/api/daily-records/delete');
+    const headers = { 'content-type': 'application/json', 'x-personal-memory-token': '' };
+    const deniedLease = bridge.issue({
+      actorId: 'trusted-owner', ownerId: 'trusted-owner', sourceId: 'delete-request-1',
+      receivedAt: '2026-10-07T12:00:00.000Z', timezone: 'Asia/Shanghai',
+      sourceText: '不要删除这条阅读记录', authorizedSpaceIds: ['reading-space'],
+    });
+    try {
+      const denied = await fetch(route, {
+        method: 'POST', headers: { ...headers, 'x-personal-memory-token': deniedLease.token },
+        body: JSON.stringify({ recordId: record.id }),
+      });
+      assert.equal(denied.status, 403);
+      assert.equal(daily.getRecord(record.id)?.content, 'Private reading note');
+      assert.deepEqual(invalidated, []);
+    } finally { deniedLease.release(); }
+
+    const outOfScopeLease = bridge.issue({
+      actorId: 'trusted-owner', ownerId: 'trusted-owner', sourceId: 'delete-request-2',
+      receivedAt: '2026-10-07T12:00:00.000Z', timezone: 'Asia/Shanghai',
+      sourceText: '请删除这条阅读记录', authorizedSpaceIds: ['career'],
+    });
+    try {
+      const denied = await fetch(route, {
+        method: 'POST', headers: { ...headers, 'x-personal-memory-token': outOfScopeLease.token },
+        body: JSON.stringify({ recordId: record.id }),
+      });
+      assert.equal(denied.status, 404);
+      assert.equal(daily.getRecord(record.id)?.content, 'Private reading note');
+    } finally { outOfScopeLease.release(); }
+
+    const lease = bridge.issue({
+      actorId: 'trusted-owner', ownerId: 'trusted-owner', sourceId: 'delete-request-3',
+      receivedAt: '2026-10-07T12:00:00.000Z', timezone: 'Asia/Shanghai',
+      sourceText: '请删除这条阅读记录', authorizedSpaceIds: ['reading-space'],
+    });
+    try {
+      const deleted = await fetch(route, {
+        method: 'POST', headers: { ...headers, 'x-personal-memory-token': lease.token },
+        body: JSON.stringify({ recordId: record.id }),
+      });
+      assert.equal(deleted.status, 200);
+      assert.deepEqual(await deleted.json(), { recordId: record.id, status: 'deleted' });
+      assert.equal(daily.getRecord(record.id)?.content, '');
+      assert.equal(daily.getRecord(record.id)?.userView, undefined);
+      assert.deepEqual(invalidated, [record.id]);
     } finally { lease.release(); }
   });
 });

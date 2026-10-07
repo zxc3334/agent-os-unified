@@ -10,6 +10,7 @@ export const SAVE_PERSONAL_MEMORY_TOOL_NAME = 'save_personal_memory';
 export const SEARCH_PERSONAL_MEMORY_TOOL_NAME = 'search_personal_memory';
 export const CAPTURE_DAILY_RECORD_TOOL_NAME = 'capture_daily_record';
 export const SEARCH_DAILY_RECORDS_TOOL_NAME = 'search_daily_records';
+export const DELETE_DAILY_RECORD_TOOL_NAME = 'delete_daily_record';
 export const CREATE_PERSONAL_REMINDER_TOOL_NAME = 'create_personal_reminder';
 export const CREATE_DAILY_REMINDER_TOOL_NAME = 'create_daily_reminder';
 export const SAVE_CAREER_INTERVIEW_FEEDBACK_TOOL_NAME = 'save_career_interview_feedback';

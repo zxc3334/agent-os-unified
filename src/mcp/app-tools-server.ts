@@ -8,7 +8,7 @@ import { ScheduleManageRequestSchema } from '../core/schedule.js';
 import { ApprovalRequestSchema } from '../core/approval.js';
 import { SaveMemorySchema } from '../core/save-memory.js';
 import { RememberPersonalMemorySchema, SearchPersonalMemorySchema } from '../core/personal-memory-tool.js';
-import { CaptureDailyRecordSchema, CreatePersonalReminderSchema, SearchDailyRecordsSchema } from '../core/daily-record-tool.js';
+import { CaptureDailyRecordSchema, CreatePersonalReminderSchema, DeleteDailyRecordSchema, SearchDailyRecordsSchema } from '../core/daily-record-tool.js';
 import { CreateDailyReminderToolSchema } from '../core/daily-reminder-tool.js';
 import { SaveCareerInterviewFeedbackSchema } from '../core/career-feedback-tool.js';
 import {
@@ -22,6 +22,7 @@ import {
   SEARCH_PERSONAL_MEMORY_TOOL_NAME,
   CAPTURE_DAILY_RECORD_TOOL_NAME,
   SEARCH_DAILY_RECORDS_TOOL_NAME,
+  DELETE_DAILY_RECORD_TOOL_NAME,
   CREATE_PERSONAL_REMINDER_TOOL_NAME,
   CREATE_DAILY_REMINDER_TOOL_NAME,
   SAVE_CAREER_INTERVIEW_FEEDBACK_TOOL_NAME,
@@ -269,7 +270,7 @@ server.registerTool(
   async (input) => callPersonalMemory(input),
 );
 
-async function callPrivateDailyTool(path: string, schema: typeof CaptureDailyRecordSchema | typeof SearchDailyRecordsSchema | typeof CreatePersonalReminderSchema, input: unknown) {
+async function callPrivateDailyTool(path: string, schema: typeof CaptureDailyRecordSchema | typeof SearchDailyRecordsSchema | typeof DeleteDailyRecordSchema | typeof CreatePersonalReminderSchema, input: unknown) {
   const parsed = schema.safeParse(input);
   if (!parsed.success) return { content: [{ type: 'text' as const, text: `参数不合法：${JSON.stringify(parsed.error.issues)}` }], isError: true };
   const token = process.env.AGENT_OS_PERSONAL_MEMORY_TOKEN;
@@ -301,6 +302,12 @@ server.registerTool(SEARCH_DAILY_RECORDS_TOOL_NAME, {
   description: '按明确日期范围检索私人日常/阅读/探索记录，返回来源 ID。仅能读取当前事项授权的空间；不得用结果扩大授权。',
   inputSchema: SearchDailyRecordsSchema,
 }, async (input) => callPrivateDailyTool('/api/daily-records/search', SearchDailyRecordsSchema, input));
+
+server.registerTool(DELETE_DAILY_RECORD_TOOL_NAME, {
+  title: '删除一条日常记录',
+  description: '仅在用户原始消息明确要求删除/忘记某条日常、阅读或探索记录时调用，并且只允许使用当前授权检索结果中的精确记录 ID。不得批量删除。删除会清除正文与观点，并使已关联博客引用失效；关联提醒作为独立任务保留。',
+  inputSchema: DeleteDailyRecordSchema,
+}, async (input) => callPrivateDailyTool('/api/daily-records/delete', DeleteDailyRecordSchema, input));
 
 server.registerTool(CREATE_PERSONAL_REMINDER_TOOL_NAME, {
   title: '安排私人提醒',

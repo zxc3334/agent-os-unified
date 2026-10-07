@@ -184,7 +184,15 @@ const personalReminderScheduler = new PersonalReminderScheduler({
   onError: (message) => console.error(`[提醒] ${message}`),
 });
 const personalMemoryBridge = personalMemoryStore
-  ? new PersonalMemoryToolBridge(personalMemoryStore, dailyRecords, (reminder) => personalReminderScheduler.schedule(reminder))
+  ? new PersonalMemoryToolBridge(
+      personalMemoryStore, dailyRecords,
+      (reminder) => personalReminderScheduler.schedule(reminder),
+      (record) => {
+        if (record.scopeId) blogAssociations?.invalidateSource(
+          { kind: 'daily-record', id: record.id, spaceId: record.scopeId }, 'deleted', new Date().toISOString(),
+        );
+      },
+    )
   : undefined;
 const personalMemoryApiPort = personalMemoryBridge
   ? await personalMemoryBridge.start(Number(process.env.AGENT_OS_PERSONAL_MEMORY_API_PORT ?? 0))

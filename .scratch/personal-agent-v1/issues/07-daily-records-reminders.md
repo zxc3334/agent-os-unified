@@ -53,4 +53,10 @@
 
 - Current implementation update: owner-only `/daily delete <ID>` now removes record text, reading/exploration stance fields, and detaches any linked reminder without silently cancelling that independent task. Deleted rows persist as content-free tombstones and are excluded from recaps/retrieval; retry is idempotent. If scoped, the associated blog reference is invalidated before deletion.
 - Verification: `pnpm test` (118/118), `pnpm build`, `git diff --check`.
-- Remaining: natural-language daily-record delete flow, richer author/user feedback, and summary/review integration. Ticket remains in progress and still depends on broader Ticket 05 entry wiring.
+- Remaining at that point: natural-language daily-record deletion, richer author/user feedback, and summary/review integration. Ticket remains in progress and still depends on broader Ticket 05 entry wiring.
+
+
+- Follow-up: added owner-private `delete_daily_record` for conversational deletion. The bridge verifies explicit, non-negated delete intent in the trusted original message, exact record ID, and current space authorization before clearing content and stances; scoped blog references are invalidated first, and linked reminders remain independent. The daily-record skill now tells the agent to locate one authorized record and use its exact ID rather than perform broad deletion.
+- Tests cover negated intent rejection, out-of-scope denial, content/stance clearing, reference invalidation callback, and app-tool name normalization.
+- Verification after conversational deletion integration: `pnpm test` (126/126), `pnpm build`, `git diff --check`.
+- Remaining: richer author/user feedback and daily/weekly summary-review integration; broader natural-language deletion and live Feishu end-to-end validation remain outside this single-record tool slice. Ticket remains in progress.

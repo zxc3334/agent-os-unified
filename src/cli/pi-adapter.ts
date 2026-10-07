@@ -50,6 +50,7 @@ const APP_TOOL_LABELS: Record<string, string> = {
   request_spec_approval: '提交方案产物',
   capture_daily_record: '记录日常',
   search_daily_records: '回顾日常记录',
+  delete_daily_record: '删除日常记录',
   create_personal_reminder: '安排私人提醒',
   save_career_interview_feedback: '保存面试复习反馈',
 };

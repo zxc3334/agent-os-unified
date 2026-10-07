@@ -26,3 +26,5 @@ export const SearchDailyRecordsSchema = z.object({
   spaceId: id.optional(),
   limit: z.number().int().min(1).max(30).optional().default(10),
 }).strict();
+
+export const DeleteDailyRecordSchema = z.object({ recordId: id }).strict();

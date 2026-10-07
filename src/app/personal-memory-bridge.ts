@@ -2,8 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { PersonalMemoryStore, PersonalMemorySource } from '../core/personal-memory.js';
-import type { DailyReminder, JsonDailyRecordsReminders } from '../core/daily-records.js';
-import { CaptureDailyRecordSchema, CreatePersonalReminderSchema, SearchDailyRecordsSchema } from '../core/daily-record-tool.js';
+import type { DailyRecord, DailyReminder, JsonDailyRecordsReminders } from '../core/daily-records.js';
+import { CaptureDailyRecordSchema, CreatePersonalReminderSchema, DeleteDailyRecordSchema, SearchDailyRecordsSchema } from '../core/daily-record-tool.js';
 import { confidenceFromTrustedSource, RememberPersonalMemorySchema, SearchPersonalMemorySchema } from '../core/personal-memory-tool.js';
 
 export interface TrustedMemoryInvocation {
@@ -31,6 +31,7 @@ export class PersonalMemoryToolBridge {
     private readonly store: PersonalMemoryStore,
     private readonly dailyRecords?: JsonDailyRecordsReminders,
     private readonly onReminderCreated?: (reminder: DailyReminder) => void,
+    private readonly invalidateDailySource?: (record: DailyRecord) => void,
   ) {}
 
   async start(port = 0): Promise<number> {
@@ -65,7 +66,7 @@ export class PersonalMemoryToolBridge {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (request.method !== 'POST' || !['/api/personal-memory/remember', '/api/personal-memory/search', '/api/daily-records/capture', '/api/daily-records/search', '/api/personal-reminders/create'].includes(request.url ?? '')) {
+    if (request.method !== 'POST' || !['/api/personal-memory/remember', '/api/personal-memory/search', '/api/daily-records/capture', '/api/daily-records/search', '/api/daily-records/delete', '/api/personal-reminders/create'].includes(request.url ?? '')) {
       return send(response, 404, { error: 'Not found' });
     }
     const token = request.headers['x-personal-memory-token'];
@@ -169,6 +170,25 @@ export class PersonalMemoryToolBridge {
       });
       return send(response, 201, { recordId: record.id, kind: record.kind, date: record.date, scopeId: record.scopeId });
     }
+    if (route === '/api/daily-records/delete') {
+      if (!hasExplicitDailyDeleteIntent(invocation.sourceText)) {
+        return send(response, 403, { error: 'The original owner message does not explicitly request deleting a daily record' });
+      }
+      const parsed = DeleteDailyRecordSchema.safeParse(body);
+      if (!parsed.success) return send(response, 400, { error: 'Invalid daily record ID', issues: parsed.error.issues });
+      const record = this.dailyRecords.getRecord(parsed.data.recordId);
+      if (!record) return send(response, 404, { error: 'Daily record not found in the current authorized scope' });
+      if (record.scopeId === null
+        ? invocation.allowUnclassifiedRecords !== true
+        : !invocation.authorizedSpaceIds.includes(record.scopeId)) {
+        return send(response, 404, { error: 'Daily record not found in the current authorized scope' });
+      }
+      if (record.status === 'deleted') return send(response, 200, { recordId: record.id, status: 'already_deleted' });
+      if (record.scopeId !== null) this.invalidateDailySource?.(record);
+      const deleted = this.dailyRecords.deleteRecord(record.id);
+      if (!deleted) return send(response, 404, { error: 'Daily record not found' });
+      return send(response, 200, { recordId: deleted.id, status: 'deleted' });
+    }
     if (route === '/api/personal-reminders/create') {
       const parsed = CreatePersonalReminderSchema.safeParse(body);
       if (!parsed.success) return send(response, 400, { error: 'Invalid personal reminder', issues: parsed.error.issues });
@@ -233,4 +253,10 @@ async function readJson(request: IncomingMessage): Promise<unknown> {
 function send(response: ServerResponse, status: number, body: unknown): void {
   response.writeHead(status, { 'content-type': 'application/json; charset=utf-8' });
   response.end(JSON.stringify(body));
+}
+
+function hasExplicitDailyDeleteIntent(sourceText: string): boolean {
+  const request = /(?:删除|删掉|删去|移除|清除|忘掉|忘记).{0,24}(?:记录|日常|阅读|探索)|(?:记录|日常|阅读|探索).{0,24}(?:删除|删掉|删去|移除|清除|忘掉|忘记)/i;
+  const negated = /(?:不要|别|不|无需|不用|勿).{0,6}(?:删除|删掉|删去|移除|清除|忘掉|忘记)/i;
+  return request.test(sourceText) && !negated.test(sourceText);
 }
