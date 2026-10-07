@@ -6,19 +6,45 @@ export type SlashCommand =
   | { name: 'cd'; path?: string }
   | { name: 'schedules' }
   | { name: 'topics' }
-  | { name: 'schedule'; request?: string };
+  | { name: 'schedule'; request?: string }
+  | { name: 'memory'; action: 'review' | 'recent'; page: number }
+  | { name: 'memory'; action: 'confirm' | 'reject' | 'forget'; entryId: string }
+  | { name: 'memory'; action: 'correct'; entryId: string; content: string };
 
 const COMMAND_RE = /^(?:@.+?\s+)?\/(close|status|help|new|resume|team)\s*$/;const CD_RE = /^(?:@.+?\s+)?\/cd(?:\s+([\s\S]+?))?\s*$/;
 const COMPACT_RE = /^(?:@.+?\s+)?\/compact(?:\s+([\s\S]+?))?\s*$/;
 const SCHEDULE_RE = /^(?:@.+?\s+)?\/schedule(?:\s+([\s\S]+?))?\s*$/;
 const SCHEDULES_RE = /^(?:@.+?\s+)?\/schedules\s*$/;
 const TOPICS_RE = /^(?:@.+?\s+)?\/topics\s*$/;
+const MEMORY_RE = /^(?:@.+?\s+)?\/memory(?:\s+([\s\S]+?))?\s*$/;
+const MEMORY_ID_RE = /^[a-zA-Z0-9_-]{1,100}$/;
 const CLI_REQUEST_RE = /^(?:@.+?\s+)?\/(agy|pi|claude|codex)(?:\s+([\s\S]*))?$/;
 
 export function parseCommand(text: string): SlashCommand | undefined {
   const value = text.trim();
   if (SCHEDULES_RE.test(value)) return { name: 'schedules' };
   if (TOPICS_RE.test(value)) return { name: 'topics' };
+  const memoryMatch = MEMORY_RE.exec(value);
+  if (memoryMatch) {
+    const args = memoryMatch[1]?.trim().split(/\s+/, 3) ?? [];
+    const action = args[0] || 'review';
+    if (action === 'review' || action === 'recent') {
+      if (args.length > 2) return undefined;
+      const page = args[1] === undefined ? 1 : Number(args[1]);
+      if (!Number.isSafeInteger(page) || page < 1 || page > 10) return undefined;
+      return { name: 'memory', action, page };
+    }
+    if (action === 'confirm' || action === 'reject' || action === 'forget') {
+      if (args.length !== 2 || !MEMORY_ID_RE.test(args[1])) return undefined;
+      return { name: 'memory', action, entryId: args[1] };
+    }
+    if (action === 'correct') {
+      const correction = /^correct\s+([a-zA-Z0-9_-]{1,100})\s+([\s\S]+)$/.exec(memoryMatch[1] ?? '');
+      if (!correction?.[2].trim()) return undefined;
+      return { name: 'memory', action, entryId: correction[1], content: correction[2].trim() };
+    }
+    return undefined;
+  }
   const scheduleMatch = SCHEDULE_RE.exec(value);
   if (scheduleMatch) {
     return { name: 'schedule', request: scheduleMatch[1]?.trim() || undefined };

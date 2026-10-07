@@ -26,6 +26,7 @@ import {
 } from './im/card.js';
 import { resolveMentions, extractResourceKeys } from './im/message-parser.js';
 import { parseCliRequest, parseCommand } from './core/command-parser.js';
+import { PersonalMemoryStore } from './core/personal-memory.js';
 import { SessionManager } from './core/session-manager.js';
 import { JsonSessionStore } from './core/session-store.js';
 import { TaskProgressTracker } from './core/task-progress.js';
@@ -160,6 +161,14 @@ function persistBotIdentities(): void {
   );
 }
 const collaborationService = new CollaborationService(runtime);
+const configuredOwnerOpenId = process.env.OWNER_OPEN_ID?.trim() || undefined;
+const privateDataRoot = resolve(process.env.AGENT_OS_DATA_ROOT ?? join('data'));
+const personalMemoryStore = configuredOwnerOpenId
+  ? new PersonalMemoryStore({
+      directory: join(privateDataRoot, 'personal-memory'),
+      ownerId: configuredOwnerOpenId,
+    })
+  : undefined;
 const scheduleFilePath = join('data', 'schedules.json');
 const scheduleStore = new JsonScheduleStore(scheduleFilePath);
 const scheduleRunStore = new JsonScheduleRunStore(
@@ -366,6 +375,8 @@ async function startConfiguredBot(
         cliRequest,
         isNew,
         hasThread,
+        personalMemoryStore,
+        trustedOwnerOpenId: configuredOwnerOpenId,
       });
       if (commandOutcome === 'handled') return;
 

@@ -18,6 +18,7 @@ import {
 import { formatSessionStatus } from "./session-view.js";
 import type { AppRuntime } from "./runtime.js";
 import type { Scheduler } from "./scheduler.js";
+import type { PersonalMemoryStore } from "../core/personal-memory.js";
 
 export type CommandOutcome = "handled" | "continue";
 
@@ -33,6 +34,8 @@ export async function handleSessionCommand(options: {
   cliRequest?: CliRequest;
   isNew: boolean;
   hasThread: boolean;
+  personalMemoryStore?: PersonalMemoryStore;
+  trustedOwnerOpenId?: string;
 }): Promise<CommandOutcome> {
   const {
     runtime,
@@ -46,6 +49,8 @@ export async function handleSessionCommand(options: {
     cliRequest,
     isNew,
     hasThread,
+    personalMemoryStore,
+    trustedOwnerOpenId,
   } = options;
 
   if (!isNew && cliRequest && cliRequest.cliId !== session.cliId) {
@@ -54,6 +59,77 @@ export async function handleSessionCommand(options: {
       `当前话题已经在使用 ${cliAdapter.displayName}。如需切换执行引擎，请新开一个话题。`,
       hasThread,
     );
+    return "handled";
+  }
+
+  if (command?.name === "memory") {
+    if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId) {
+      await bot.reply(msg.messageId, "个人记忆命令仅限配置的所有者使用。", hasThread);
+      return "handled";
+    }
+    if (!personalMemoryStore) {
+      await bot.reply(msg.messageId, "个人记忆暂不可用，请检查本地存储配置。", hasThread);
+      return "handled";
+    }
+    const safe = (value: string, max = 700) => Array.from(value.replace(/[\r\n\t\u0000-\u001f\u007f]/g, " ")).slice(0, max).join("");
+    try {
+      const spaces = await personalMemoryStore.listSpaces();
+      const authorizedSpaceIds = spaces.map((space) => space.id);
+      const names = new Map(spaces.map((space) => [space.id, space.name]));
+      if (command.action === "review" || command.action === "recent") {
+        const pageSize = 5;
+        const fetchLimit = command.page * pageSize;
+        const all = command.action === "review"
+          ? await personalMemoryStore.listForReview({ authorizedSpaceIds, limit: fetchLimit })
+          : await personalMemoryStore.listRecent({ authorizedSpaceIds, limit: fetchLimit });
+        const entries = all.slice((command.page - 1) * pageSize, command.page * pageSize);
+        const title = command.action === "review" ? "待确认记忆" : "最近记忆";
+        const lines = entries.map((entry, index) => {
+          const source = entry.sources.map((item) => item.sourceId).join(", ") || "无来源";
+          return `${(command.page - 1) * pageSize + index + 1}. [${entry.id}] 来源：${safe(source, 180)}；空间：${safe(names.get(entry.spaceId) ?? "未知空间", 100)}；置信：${entry.confidence}；状态：${entry.status}；内容：${safe(entry.content)}`;
+        });
+        const next = command.page < 10 && all.length === fetchLimit ? `\n下一页：/memory ${command.action} ${command.page + 1}` : "";
+        await bot.reply(msg.messageId, lines.length ? `${title}（第 ${command.page} 页，每页最多 5 条）\n${lines.join("\n")}${next}` : `${title}：没有更多记录。`, hasThread);
+        return "handled";
+      }
+      if (!("entryId" in command)) return "handled";
+      const entry = await personalMemoryStore.get(command.entryId, { authorizedSpaceIds });
+      if (!entry) {
+        await bot.reply(msg.messageId, "没有找到可操作的有效记忆。", hasThread);
+        return "handled";
+      }
+      let resultMessage: string;
+      if (command.action === "confirm") {
+        await personalMemoryStore.confirm(entry.id, entry.version);
+        resultMessage = "记忆已确认。";
+      } else if (command.action === "correct") {
+        await personalMemoryStore.correct(entry.id, entry.version, {
+          content: command.content,
+          source: {
+            sourceId: msg.messageId,
+            actorId: trustedOwnerOpenId,
+            receivedAt: new Date().toISOString(),
+            timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC",
+            excerpt: command.content,
+          },
+        });
+        resultMessage = "记忆已更正。";
+      } else if (command.action === "reject") {
+        const rejected = await personalMemoryStore.reject(entry.id, entry.version);
+        resultMessage = rejected ? "已拒绝该候选；来源记录未删除。" : "该记忆已不再有效。";
+      } else {
+        const forgotten = await personalMemoryStore.forget(entry.id, entry.version);
+        resultMessage = forgotten ? "已忘记该记忆，内容已清除并抑制同一来源重新提取。" : "该记忆已经忘记。";
+      }
+      const updated = await personalMemoryStore.get(entry.id, { authorizedSpaceIds });
+      if (updated) {
+        const source = updated.sources.map((item) => item.sourceId).join(", ") || "无来源";
+        resultMessage += `\n来源：${safe(source, 180)}；空间：${safe(names.get(updated.spaceId) ?? "未知空间", 100)}；置信：${updated.confidence}；状态：${updated.status}；内容：${safe(updated.content)}`;
+      }
+      await bot.reply(msg.messageId, resultMessage, hasThread);
+    } catch (error) {
+      await bot.reply(msg.messageId, `记忆操作失败，未确认成功：${safe((error as Error).message, 300)}`, hasThread);
+    }
     return "handled";
   }
 
@@ -66,6 +142,8 @@ export async function handleSessionCommand(options: {
         "/schedule <需求> 创建定时任务",
         "/schedules 查看定时任务",
         "/topics 扫描有哪些素材够写一篇博客了",
+        "/memory [review|recent] [页码] 查看待确认或最近记忆（每页最多 5 条）",
+        "/memory confirm <id>、/memory correct <id> <内容>、/memory reject <id>、/memory forget <id>",
         "/schedule pause <id> 暂停定时任务",
         "/schedule resume <id> 恢复定时任务",
         "/schedule delete <id> 删除定时任务",
