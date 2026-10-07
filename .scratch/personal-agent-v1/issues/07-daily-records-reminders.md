@@ -1,6 +1,6 @@
 # 日常记录、阅读与提醒
 
-- Status: in-progress (safe reminder clarification added; broader entry integration blocked by 05)
+- Status: Complete (automated command/tool contract verified; no live Feishu smoke test yet)
 - Blocked by: 05-personal-entry-skills
 - Milestone: D
 - Spec: [spec.md](../spec.md)
@@ -63,4 +63,10 @@
 
 - Follow-up: the enabled `daily-records` skill now routes requested summaries through bounded `search_daily_records` date ranges, cites returned source IDs, and keeps the recap out of long-term memory. This makes the existing dated recap capability available to the natural-language entry without adding a second summary store.
 - Verification after recap guidance integration: `pnpm test` (127/127), `pnpm build`, `git diff --check`.
-- Remaining: richer reading/author viewpoint feedback, proactive daily/weekly recap scheduling or review integration, and live Feishu end-to-end validation. Ticket remains in progress.
+- Completion audit: acceptance criteria are covered by durable-store, owner-DM command/tool, scope/provenance, reminder lifecycle/recovery, and sourced recap tests. Reading records can retain author and user viewpoints separately; an on-demand recap is date-bounded and does not create long-term memory. Proactive recap scheduling is not required by this v1 scope. No live Feishu smoke test has been run; this is an environment-level verification limitation, not an unimplemented ticket requirement.
+
+
+### Completion verification
+
+- Verified by the full automated suite: `pnpm test` (131/131), `pnpm build`, `git diff --check`.
+- Status is Complete for the specified v1 behavior; live Feishu transport was not exercised.
