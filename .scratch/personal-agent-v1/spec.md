@@ -408,7 +408,7 @@
 
 - 本方案以用户对话和 Comet 源码核对为需求/设计参考；不依赖此前对 Dots/Muse/Cue/Hermes 的产品定位描述来证明技术可行性。
 - 仓库未提供既有 CONTEXT 或 ADR。本次增加领域词汇表，以“记忆空间”表达用户讨论中的内容分区，不把它等同于独立运行 profile。
-- 原系统架构见 [architecture.md](/Users/jackson/Desktop/project/agent-os-unified/.scratch/personal-agent-v1/architecture.md)，Comet 机制、源码证据及不直接照搬的原因见 [comet-reference.md](/Users/jackson/Desktop/project/agent-os-unified/.scratch/personal-agent-v1/comet-reference.md)；Implementation Decisions 不锁定具体文件路径或私有函数，避免实现路径变化导致规格过时。
+- 原系统架构见 [architecture.md](architecture.md)，Comet 机制、源码证据及不直接照搬的原因见 [comet-reference.md](comet-reference.md)；Implementation Decisions 不锁定具体文件路径或私有函数，避免实现路径变化导致规格过时。
 - 实施状态以本地任务票及 Git 提交为准；未创建 GitHub issue 或 PR。
 - 用户在 2026-10-07 明确授权开始实施，确认使用统一任务执行入口、替换式执行器/飞书 Adapter 和真实临时存储作为主测试接缝。
 - 优先保护近期求职体验：第一版以事实可靠、复习闭环和少量日常输入为成功标准，不以新增领域数量、记忆数量或完全自主程度为指标。

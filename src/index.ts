@@ -27,6 +27,7 @@ import {
 import { resolveMentions, extractResourceKeys } from './im/message-parser.js';
 import { parseCliRequest, parseCommand } from './core/command-parser.js';
 import { PersonalMemoryStore } from './core/personal-memory.js';
+import { preparePersonalMemoryContext } from './core/personal-memory-context.js';
 import { SessionManager } from './core/session-manager.js';
 import { JsonSessionStore } from './core/session-store.js';
 import { TaskProgressTracker } from './core/task-progress.js';
@@ -341,12 +342,31 @@ async function startConfiguredBot(
       }
       const memoryContext = await formatMemoryPromptContext(config.project)
         .catch(() => undefined);
+      const personalMemoryContext = personalMemoryStore
+        && msg.chatType === 'p2p'
+        && msg.senderOpenId === configuredOwnerOpenId
+        ? await personalMemoryStore.listSpaces()
+          .then((spaces) => preparePersonalMemoryContext(personalMemoryStore, {
+            actorId: msg.senderOpenId,
+            trustedOwnerId: configuredOwnerOpenId,
+            directMessage: true,
+            query: taskText,
+            authorizedSpaceIds: spaces.map((space) => space.id),
+            maxEntries: 5,
+            maxCharacters: 3_000,
+          }))
+          .then((context) => context.text)
+          .catch((error) => {
+            console.warn('[个人记忆] 相关上下文读取失败:', (error as Error).message);
+            return '';
+          })
+        : '';
       const prompt = buildBotPrompt(
         config,
         taskText,
         teamRegistry.contextFor(config.id),
         agentOsConfig.defaultProductDeliveryMode,
-        memoryContext ?? '',
+        [personalMemoryContext, memoryContext].filter(Boolean).join('\n\n'),
       );
       const taskCardTitle = isCompacting
         ? '整理上下文'

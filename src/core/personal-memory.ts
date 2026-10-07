@@ -339,7 +339,7 @@ export class PersonalMemoryStore {
 
   async search(
     query: string,
-    options: { authorizedSpaceIds: string[]; limit?: number; includeInferred?: boolean },
+    options: { authorizedSpaceIds: string[]; limit?: number; includeInferred?: boolean; minimumRelevance?: number },
   ): Promise<PersonalMemoryEntry[]> {
     const cleanQuery = asNonEmpty(query, 'query', 2000).normalize('NFKC').toLocaleLowerCase();
     const terms = queryTerms(cleanQuery);
@@ -350,7 +350,7 @@ export class PersonalMemoryStore {
       .filter((entry) => entry.ownerId === this.ownerId && allowed.has(entry.spaceId) && entry.status === 'active')
       .filter((entry) => options.includeInferred === true || !['inferred', 'contested'].includes(entry.confidence))
       .map((entry) => ({ entry, score: relevance(entry, terms, cleanQuery) }))
-      .filter((item) => item.score > 0)
+      .filter((item) => item.score >= (options.minimumRelevance ?? 0) && item.score > 0)
       .sort((a, b) => b.score - a.score || b.entry.updatedAt.localeCompare(a.entry.updatedAt))
       .slice(0, clampLimit(options.limit, 10))
       .map(({ entry }) => structuredClone(entry));
@@ -468,6 +468,7 @@ export class PersonalMemoryStore {
     const entries = await this.search(query, {
       authorizedSpaceIds: options.authorizedSpaceIds,
       limit: options.maxEntries ?? 5,
+      minimumRelevance: 0.3,
     });
     if (!entries.length) return '';
     const state = await this.readState();
