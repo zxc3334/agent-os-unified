@@ -60,3 +60,7 @@
 - Tests cover negated intent rejection, out-of-scope denial, content/stance clearing, reference invalidation callback, and app-tool name normalization.
 - Verification after conversational deletion integration: `pnpm test` (126/126), `pnpm build`, `git diff --check`.
 - Remaining: richer author/user feedback and daily/weekly summary-review integration; broader natural-language deletion and live Feishu end-to-end validation remain outside this single-record tool slice. Ticket remains in progress.
+
+- Follow-up: the enabled `daily-records` skill now routes requested summaries through bounded `search_daily_records` date ranges, cites returned source IDs, and keeps the recap out of long-term memory. This makes the existing dated recap capability available to the natural-language entry without adding a second summary store.
+- Verification after recap guidance integration: `pnpm test` (127/127), `pnpm build`, `git diff --check`.
+- Remaining: richer reading/author viewpoint feedback, proactive daily/weekly recap scheduling or review integration, and live Feishu end-to-end validation. Ticket remains in progress.

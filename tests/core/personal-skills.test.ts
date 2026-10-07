@@ -44,3 +44,19 @@ test('career feedback persistence requires explicit owner-language opt-in and re
   assert.equal(explicitlyRequestsCareerFeedbackSave('不要保存这次面试反馈'), false);
   assert.equal(explicitlyRequestsCareerFeedbackSave('不用保存面试反馈'), false);
 });
+
+
+test('daily-record skill uses bounded sourced recaps without converting them into long-term memory', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'agent-os-daily-skill-'));
+  try {
+    const registry = new JsonPersonalSkillRegistry(join(directory, 'personal-skills.json'));
+    await registry.enable('daily-records');
+    const guidance = await registry.promptFor('帮我做本周回顾');
+    assert.match(guidance, /search_daily_records/);
+    assert.match(guidance, /指定日期范围/);
+    assert.match(guidance, /来源 ID/);
+    assert.match(guidance, /不写入长期记忆/);
+  } finally {
+    await rm(directory, { recursive: true, force: true });
+  }
+});
