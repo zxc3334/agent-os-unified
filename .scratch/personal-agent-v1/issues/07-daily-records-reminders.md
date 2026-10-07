@@ -24,3 +24,13 @@
 - Tests cover persistence, parser boundaries, private-chat authorization, timezones, explicit delivery receipts, missed recovery, and separation of records from reminders.
 - Verification: `pnpm test` (65/65), `pnpm build`, `git diff --check`. A scheduler test uses a due time safely beyond startup to avoid classifying a test-runner scheduling delay as a missed reminder.
 - Remaining: fuller natural-language capture/clarification, reading author-view vs user-view input controls, retry/edit UX for failed reminders, and review/summary integrations. Ticket remains in progress.
+
+
+### Conversational tool integration update
+
+- Added owner-DM-only MCP tools `capture_daily_record`, `search_daily_records`, and `create_personal_reminder`, backed by the same durable daily/reminder store and short-lived trusted invocation token. Relative dates use the message receipt timestamp/timezone; reminder delivery destination comes only from the trusted Feishu invocation.
+- Requested space IDs are checked against the invocation allowlist. Recap filters by authorized spaces; unclassified records are visible only when the matter uses the default all-spaces policy, not when explicitly scoped.
+- Reminder creation is immediately registered with the receipt-aware scheduler. Duplicate tool calls for the same source/action are idempotent.
+- MCP tool names are normalized through CLI adapters. Tests exercise durable capture, author/user stance separation, timezone conversion, private delivery target, scope denial/isolation, and CLI alias mapping.
+- Verification: `pnpm test` (67/67), `pnpm build`, `git diff --check`.
+- Remaining: natural-language clarification when key date/time details are missing, user-facing retry of failed delivery, richer author/user feedback, and summary/review integration. Ticket remains in progress.

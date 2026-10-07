@@ -159,7 +159,7 @@ const personalReminderScheduler = new PersonalReminderScheduler({
   onError: (message) => console.error(`[提醒] ${message}`),
 });
 const personalMemoryBridge = personalMemoryStore
-  ? new PersonalMemoryToolBridge(personalMemoryStore)
+  ? new PersonalMemoryToolBridge(personalMemoryStore, dailyRecords, (reminder) => personalReminderScheduler.schedule(reminder))
   : undefined;
 const personalMemoryApiPort = personalMemoryBridge
   ? await personalMemoryBridge.start(Number(process.env.AGENT_OS_PERSONAL_MEMORY_API_PORT ?? 0))
@@ -590,6 +590,9 @@ async function startConfiguredBot(
             timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC',
             sourceText: msg.text,
             authorizedSpaceIds: authorizedPersonalSpaceIds,
+            allowUnclassifiedRecords: session.memorySpaceIds === undefined,
+            chatId: msg.chatId,
+            botId: config.id,
           })
         : undefined;
       const cliEnv: Record<string, string> = {

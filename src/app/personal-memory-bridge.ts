@@ -2,6 +2,8 @@ import { createHash, randomUUID } from 'node:crypto';
 import { createServer, type IncomingMessage, type ServerResponse } from 'node:http';
 import type { AddressInfo } from 'node:net';
 import type { PersonalMemoryStore, PersonalMemorySource } from '../core/personal-memory.js';
+import type { DailyReminder, JsonDailyRecordsReminders } from '../core/daily-records.js';
+import { CaptureDailyRecordSchema, CreatePersonalReminderSchema, SearchDailyRecordsSchema } from '../core/daily-record-tool.js';
 import { confidenceFromTrustedSource, RememberPersonalMemorySchema, SearchPersonalMemorySchema } from '../core/personal-memory-tool.js';
 
 export interface TrustedMemoryInvocation {
@@ -12,6 +14,9 @@ export interface TrustedMemoryInvocation {
   timezone: string;
   sourceText: string;
   authorizedSpaceIds: string[];
+  allowUnclassifiedRecords?: boolean;
+  chatId?: string;
+  botId?: string;
 }
 
 interface Invocation extends TrustedMemoryInvocation { token: string }
@@ -22,7 +27,11 @@ export class PersonalMemoryToolBridge {
   private server?: ReturnType<typeof createServer>;
   private boundPort?: number;
 
-  constructor(private readonly store: PersonalMemoryStore) {}
+  constructor(
+    private readonly store: PersonalMemoryStore,
+    private readonly dailyRecords?: JsonDailyRecordsReminders,
+    private readonly onReminderCreated?: (reminder: DailyReminder) => void,
+  ) {}
 
   async start(port = 0): Promise<number> {
     if (this.server) return this.boundPort!;
@@ -56,7 +65,7 @@ export class PersonalMemoryToolBridge {
   }
 
   private async handle(request: IncomingMessage, response: ServerResponse): Promise<void> {
-    if (request.method !== 'POST' || !['/api/personal-memory/remember', '/api/personal-memory/search'].includes(request.url ?? '')) {
+    if (request.method !== 'POST' || !['/api/personal-memory/remember', '/api/personal-memory/search', '/api/daily-records/capture', '/api/daily-records/search', '/api/personal-reminders/create'].includes(request.url ?? '')) {
       return send(response, 404, { error: 'Not found' });
     }
     const token = request.headers['x-personal-memory-token'];
@@ -65,6 +74,9 @@ export class PersonalMemoryToolBridge {
 
     try {
       const body = await readJson(request);
+      if (request.url?.startsWith('/api/daily-records/') || request.url === '/api/personal-reminders/create') {
+        return await this.handleDailyTool(request.url, body, invocation, response);
+      }
       if (request.url === '/api/personal-memory/search') {
         const parsedSearch = SearchPersonalMemorySchema.safeParse(body);
         if (!parsedSearch.success) return send(response, 400, { error: 'Invalid memory query', issues: parsedSearch.error.issues });
@@ -113,6 +125,94 @@ export class PersonalMemoryToolBridge {
       });
     } catch (error) {
       return send(response, 500, { error: (error as Error).message || 'Personal memory save failed' });
+    }
+  }
+
+  private async handleDailyTool(
+    route: string | undefined,
+    body: unknown,
+    invocation: Invocation,
+    response: ServerResponse,
+  ): Promise<void> {
+    if (invocation.actorId !== invocation.ownerId) return send(response, 403, { error: 'Only the configured owner may use personal daily records and reminders' });
+    if (!this.dailyRecords) return send(response, 503, { error: 'Personal daily records are unavailable' });
+    const source = {
+      sourceId: invocation.sourceId,
+      actorId: invocation.actorId,
+      receivedAt: invocation.receivedAt,
+      timezone: invocation.timezone,
+    };
+    if (route === '/api/daily-records/capture') {
+      const parsed = CaptureDailyRecordSchema.safeParse(body);
+      if (!parsed.success) return send(response, 400, { error: 'Invalid daily record', issues: parsed.error.issues });
+      const { spaceId, ...fields } = parsed.data;
+      if (spaceId && !invocation.authorizedSpaceIds.includes(spaceId)) return send(response, 403, { error: 'Requested memory space is not authorized for this matter' });
+      const localDate = new Intl.DateTimeFormat('en-CA', {
+        timeZone: invocation.timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+      }).formatToParts(new Date(invocation.receivedAt));
+      const dateParts = Object.fromEntries(localDate.map((part) => [part.type, part.value]));
+      const date = `${dateParts.year}-${dateParts.month}-${dateParts.day}`;
+      const operationHash = createHash('sha256').update(JSON.stringify([
+        invocation.sourceId, fields.kind, fields.content, spaceId ?? null,
+        fields.authorView ?? null, fields.userView ?? null,
+        fields.observation ?? null, fields.hypothesis ?? null, fields.question ?? null,
+      ])).digest('hex');
+      const record = this.dailyRecords.createRecord({
+        operationId: `daily-tool:${operationHash}`,
+        kind: fields.kind, date, content: fields.content, source,
+        scopeId: spaceId ?? null,
+        ...(fields.authorView ? { authorView: fields.authorView } : {}),
+        ...(fields.userView ? { userView: fields.userView } : {}),
+        ...(fields.observation ? { observation: fields.observation } : {}),
+        ...(fields.hypothesis ? { hypothesis: fields.hypothesis } : {}),
+        ...(fields.question ? { question: fields.question } : {}),
+      });
+      return send(response, 201, { recordId: record.id, kind: record.kind, date: record.date, scopeId: record.scopeId });
+    }
+    if (route === '/api/personal-reminders/create') {
+      const parsed = CreatePersonalReminderSchema.safeParse(body);
+      if (!parsed.success) return send(response, 400, { error: 'Invalid personal reminder', issues: parsed.error.issues });
+      if (!invocation.chatId || !invocation.botId) return send(response, 403, { error: 'This invocation has no trusted private delivery target' });
+      const operationHash = createHash('sha256').update(JSON.stringify([
+        invocation.sourceId, parsed.data.relativeDue, parsed.data.content, parsed.data.recordId ?? null,
+      ])).digest('hex');
+      const reminder = this.dailyRecords.createReminder({
+        operationId: `reminder-tool:${operationHash}`,
+        content: parsed.data.content,
+        relativeDue: parsed.data.relativeDue,
+        source,
+        ...(parsed.data.recordId ? { recordId: parsed.data.recordId } : {}),
+        deliveryTarget: { botId: invocation.botId, chatId: invocation.chatId },
+      });
+      this.onReminderCreated?.(reminder);
+      return send(response, 201, { reminderId: reminder.id, status: reminder.status, dueAt: reminder.dueAt });
+    }
+    const parsed = SearchDailyRecordsSchema.safeParse(body);
+    if (!parsed.success) return send(response, 400, { error: 'Invalid recap range', issues: parsed.error.issues });
+    if (parsed.data.spaceId && !invocation.authorizedSpaceIds.includes(parsed.data.spaceId)) return send(response, 403, { error: 'Requested memory space is not authorized for this matter' });
+    try {
+      const recap = this.dailyRecords.recap({
+        from: parsed.data.from,
+        through: parsed.data.through,
+        ...(parsed.data.spaceId ? { scopeId: parsed.data.spaceId } : {}),
+      });
+      const authorized = recap.records.filter((record) => record.scopeId === null
+        ? invocation.allowUnclassifiedRecords === true
+        : invocation.authorizedSpaceIds.includes(record.scopeId));
+      return send(response, 200, {
+        from: recap.from, through: recap.through,
+        records: authorized.slice(-parsed.data.limit).map((record) => ({
+          id: record.id, date: record.date, kind: record.kind, content: record.content,
+          ...(record.authorView ? { authorView: record.authorView } : {}),
+          ...(record.userView ? { userView: record.userView } : {}),
+          ...(record.observation ? { observation: record.observation } : {}),
+          ...(record.hypothesis ? { hypothesis: record.hypothesis } : {}),
+          ...(record.question ? { question: record.question } : {}),
+          sourceId: record.source.sourceId, scopeId: record.scopeId,
+        })),
+      });
+    } catch (error) {
+      return send(response, 400, { error: (error as Error).message });
     }
   }
 }

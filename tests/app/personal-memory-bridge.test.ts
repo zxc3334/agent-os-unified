@@ -6,18 +6,21 @@ import { test } from 'node:test';
 import { PersonalMemoryToolBridge } from '../../src/app/personal-memory-bridge.js';
 import { PersonalMemoryStore } from '../../src/core/personal-memory.js';
 import { confidenceFromTrustedSource } from '../../src/core/personal-memory-tool.js';
+import { JsonDailyRecordsReminders } from '../../src/core/daily-records.js';
 
 async function withBridge(run: (options: {
   bridge: PersonalMemoryToolBridge;
   store: PersonalMemoryStore;
+  daily: JsonDailyRecordsReminders;
   baseUrl: string;
 }) => Promise<void>) {
   const directory = await mkdtemp(join(tmpdir(), 'agent-os-memory-bridge-'));
   const store = new PersonalMemoryStore({ directory, ownerId: 'trusted-owner' });
-  const bridge = new PersonalMemoryToolBridge(store);
+  const daily = new JsonDailyRecordsReminders(join(directory, 'daily.json'));
+  const bridge = new PersonalMemoryToolBridge(store, daily);
   const port = await bridge.start();
   try {
-    await run({ bridge, store, baseUrl: `http://127.0.0.1:${port}/api/personal-memory/remember` });
+    await run({ bridge, store, daily, baseUrl: `http://127.0.0.1:${port}/api/personal-memory/remember` });
   } finally {
     await bridge.close();
     await rm(directory, { recursive: true, force: true });
@@ -142,4 +145,64 @@ test('confidence is derived from trusted source wording, never tool arguments', 
   assert.equal(confidenceFromTrustedSource('preference', '我不吃香菜'), 'user_stated');
   assert.equal(confidenceFromTrustedSource('event', '今天午饭吃了拉面'), 'user_stated');
   assert.equal(confidenceFromTrustedSource('fact', '用户主导了整个系统重构'), 'inferred');
+});
+
+
+test('owner-only tools capture dated records, schedule reminders from trusted receipt time, and search authorized spaces', async () => {
+  await withBridge(async ({ bridge, daily, baseUrl }) => {
+    const spaceId = 'reading-space';
+    const lease = bridge.issue({
+      actorId: 'trusted-owner', ownerId: 'trusted-owner', sourceId: 'daily-message',
+      receivedAt: '2026-10-07T12:00:00.000Z', timezone: 'Asia/Shanghai',
+      sourceText: '作者认为注意力有限，我认为练习比专注更重要。明天上午九点提醒我复盘。',
+      authorizedSpaceIds: [spaceId], allowUnclassifiedRecords: false, chatId: 'owner-dm', botId: 'assistant',
+    });
+    try {
+      const capture = await fetch(baseUrl.replace('/api/personal-memory/remember', '/api/daily-records/capture'), {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-personal-memory-token': lease.token },
+        body: JSON.stringify({
+          kind: 'reading', content: '复盘阅读笔记', spaceId,
+          authorView: '注意力有限', userView: '练习比专注更重要',
+        }),
+      });
+      assert.equal(capture.status, 201);
+      const captured = await capture.json() as { recordId: string; date: string };
+      assert.equal(captured.date, '2026-10-07');
+      assert.equal(daily.getRecord(captured.recordId)?.authorView, '注意力有限');
+
+      const reminder = await fetch(baseUrl.replace('/api/personal-memory/remember', '/api/personal-reminders/create'), {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-personal-memory-token': lease.token },
+        body: JSON.stringify({ content: '复盘', relativeDue: '明天上午9点', recordId: captured.recordId }),
+      });
+      assert.equal(reminder.status, 201);
+      const reminderResult = await reminder.json() as { reminderId: string; dueAt: string };
+      assert.equal(reminderResult.dueAt, '2026-10-08T01:00:00.000Z'); // Asia/Shanghai Oct 8 09:00
+      assert.deepEqual(daily.getReminder(reminderResult.reminderId)?.deliveryTarget, { botId: 'assistant', chatId: 'owner-dm' });
+
+      const recap = await fetch(baseUrl.replace('/api/personal-memory/remember', '/api/daily-records/search'), {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-personal-memory-token': lease.token },
+        body: JSON.stringify({ from: '2026-10-07', through: '2026-10-07', spaceId }),
+      });
+      assert.equal(recap.status, 200);
+      const recapResult = await recap.json() as { records: Array<{ authorView?: string; userView?: string }> };
+      assert.equal(recapResult.records[0]?.authorView, '注意力有限');
+      assert.equal(recapResult.records[0]?.userView, '练习比专注更重要');
+      daily.createRecord({
+        operationId: 'unclassified-record', kind: 'daily', date: '2026-10-07', content: '不应跨项目泄露',
+        source: { sourceId: 'unclassified-source', actorId: 'trusted-owner', receivedAt: '2026-10-07T12:00:00.000Z', timezone: 'Asia/Shanghai' },
+      });
+      const scopedAgain = await fetch(baseUrl.replace('/api/personal-memory/remember', '/api/daily-records/search'), {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-personal-memory-token': lease.token },
+        body: JSON.stringify({ from: '2026-10-07', through: '2026-10-07' }),
+      });
+      const scopedRows = await scopedAgain.json() as { records: Array<{ content: string }> };
+      assert.deepEqual(scopedRows.records.map((record) => record.content), ['复盘阅读笔记']);
+
+      const denied = await fetch(baseUrl.replace('/api/personal-memory/remember', '/api/daily-records/search'), {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-personal-memory-token': lease.token },
+        body: JSON.stringify({ from: '2026-10-07', through: '2026-10-07', spaceId: 'unauthorized' }),
+      });
+      assert.equal(denied.status, 403);
+    } finally { lease.release(); }
+  });
 });

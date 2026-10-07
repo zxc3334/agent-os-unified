@@ -8,6 +8,7 @@ import { ScheduleManageRequestSchema } from '../core/schedule.js';
 import { ApprovalRequestSchema } from '../core/approval.js';
 import { SaveMemorySchema } from '../core/save-memory.js';
 import { RememberPersonalMemorySchema, SearchPersonalMemorySchema } from '../core/personal-memory-tool.js';
+import { CaptureDailyRecordSchema, CreatePersonalReminderSchema, SearchDailyRecordsSchema } from '../core/daily-record-tool.js';
 import {
   CLARIFICATION_TOOL_NAME,
   PRODUCT_SPEC_TOOL_NAME,
@@ -17,6 +18,9 @@ import {
   SAVE_MEMORY_TOOL_NAME,
   SAVE_PERSONAL_MEMORY_TOOL_NAME,
   SEARCH_PERSONAL_MEMORY_TOOL_NAME,
+  CAPTURE_DAILY_RECORD_TOOL_NAME,
+  SEARCH_DAILY_RECORDS_TOOL_NAME,
+  CREATE_PERSONAL_REMINDER_TOOL_NAME,
 } from '../cli/app-tools.js';
 
 const server = new McpServer({
@@ -260,6 +264,45 @@ server.registerTool(
   },
   async (input) => callPersonalMemory(input),
 );
+
+async function callPrivateDailyTool(path: string, schema: typeof CaptureDailyRecordSchema | typeof SearchDailyRecordsSchema | typeof CreatePersonalReminderSchema, input: unknown) {
+  const parsed = schema.safeParse(input);
+  if (!parsed.success) return { content: [{ type: 'text' as const, text: `参数不合法：${JSON.stringify(parsed.error.issues)}` }], isError: true };
+  const token = process.env.AGENT_OS_PERSONAL_MEMORY_TOKEN;
+  const port = Number(process.env.AGENT_OS_PERSONAL_MEMORY_API_PORT);
+  if (!token || !Number.isInteger(port) || port < 1 || port > 65_535) {
+    return { content: [{ type: 'text' as const, text: '当前执行没有私人日常记录/提醒授权，未执行。' }], isError: true };
+  }
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}${path}`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-personal-memory-token': token },
+      body: JSON.stringify(parsed.data),
+    });
+    const payload = await response.json().catch(() => undefined) as Record<string, unknown> | undefined;
+    if (!response.ok) return { content: [{ type: 'text' as const, text: `私人记录操作失败（${response.status}）：${String(payload?.error ?? '未知错误')}` }], isError: true };
+    return { content: [{ type: 'text' as const, text: JSON.stringify(payload) }] };
+  } catch (error) {
+    return { content: [{ type: 'text' as const, text: `私人记录服务不可用，未确认操作成功：${(error as Error).message}` }], isError: true };
+  }
+}
+
+server.registerTool(CAPTURE_DAILY_RECORD_TOOL_NAME, {
+  title: '保存日常、阅读或探索记录',
+  description: '将用户明确要求保存或明显是在做随手记录的内容保存为带日期的私人记录。不要把单次事件写成永久偏好。阅读时分开填写 authorView（作者主张）和 userView（用户自己的观点）；技术探索分开 observation、hypothesis、question。spaceId 只能使用当前事项授权的空间；无法确定时省略。',
+  inputSchema: CaptureDailyRecordSchema,
+}, async (input) => callPrivateDailyTool('/api/daily-records/capture', CaptureDailyRecordSchema, input));
+
+server.registerTool(SEARCH_DAILY_RECORDS_TOOL_NAME, {
+  title: '回顾一段时间内的日常记录',
+  description: '按明确日期范围检索私人日常/阅读/探索记录，返回来源 ID。仅能读取当前事项授权的空间；不得用结果扩大授权。',
+  inputSchema: SearchDailyRecordsSchema,
+}, async (input) => callPrivateDailyTool('/api/daily-records/search', SearchDailyRecordsSchema, input));
+
+server.registerTool(CREATE_PERSONAL_REMINDER_TOOL_NAME, {
+  title: '安排私人提醒',
+  description: '仅在用户明确要求提醒时调用；relativeDue 必须包含日期和具体时间，例如“明天上午9点”。时间由 Agent OS 按可信消息接收时间和时区解析。创建成功表示已持久安排，不等于已送达。',
+  inputSchema: CreatePersonalReminderSchema,
+}, async (input) => callPrivateDailyTool('/api/personal-reminders/create', CreatePersonalReminderSchema, input));
 
 server.registerTool(
   SAVE_MEMORY_TOOL_NAME,

@@ -48,6 +48,9 @@ const APP_TOOL_LABELS: Record<string, string> = {
   dispatch_task: '派发团队任务',
   schedule_manage: '管理计划',
   request_spec_approval: '提交方案产物',
+  capture_daily_record: '记录日常',
+  search_daily_records: '回顾日常记录',
+  create_personal_reminder: '安排私人提醒',
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
