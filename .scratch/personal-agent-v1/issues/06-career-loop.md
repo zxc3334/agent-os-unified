@@ -22,4 +22,6 @@
 - Unconfirmed evidence is excluded from resume claims. Interview weakness is stored as `practice-feedback`, not confirmed project fact; review score/round history survives reopening.
 - Tests use a real temporary directory and cover confirmed/unconfirmed evidence, explicit approval, feedback provenance, persisted review progress, and invalid-input recovery.
 - Verification: `pnpm test` (53/53), `pnpm build`, `git diff --check`.
-- Remaining: connect this module to owner-authorized entry commands/skills, project and material evidence lookup, interview execution, existing learning/review scheduler, and confirmed Markdown resume output. This ticket is not complete.
+- Added owner-only `/career` commands for facts, roles/requirements, evidence-backed resume proposals, explicit approval, source-linked Markdown export, mock-interview feedback, and review score capture. Career tasks from the owner’s direct chat also receive a bounded snapshot of the active resume, source-linked evidence, and roles; private career context is kept out of group/non-owner flows. End-to-end command tests verify confirmation boundaries and exclusion of unconfirmed evidence.
+- Verification after command integration: `pnpm test` (65/65), `pnpm build`, `git diff --check`.
+- Remaining: natural-language/tool workflow instead of primarily slash commands, project/material evidence retrieval, interview execution integration, and connection of these learning records to the existing review scheduler. This ticket is not complete.

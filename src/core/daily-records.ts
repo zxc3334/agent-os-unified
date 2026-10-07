@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, fsyncSync, mkdirSync, openSync, readFileSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 export type DailyRecordKind = 'daily' | 'reading' | 'exploration';
@@ -45,6 +45,7 @@ export interface DailyReminder {
   updatedAt: string;
   deliveryAttempts: ReminderDeliveryAttempt[];
   lastDeliveryOutcome?: ReminderDeliveryOutcome;
+  deliveryTarget?: { botId: string; chatId: string };
 }
 interface StoreState {
   schemaVersion: 1;
@@ -71,6 +72,7 @@ export interface CreateReminderInput {
   dueAt?: string;
   relativeDue?: string;
   recordId?: string;
+  deliveryTarget?: { botId: string; chatId: string };
 }
 export interface Recap {
   from: string;
@@ -140,9 +142,9 @@ export function resolveRelativeDue(relativeDue: string, sourceInput: DailyRecord
   const source = normalizeSource(sourceInput);
   const phrase = nonEmpty(relativeDue, 'relativeDue', 200).toLocaleLowerCase();
   let dayOffset: number;
-  if (/\bday after tomorrow\b|\bin two days\b|后天/.test(phrase)) dayOffset = 2;
-  else if (/\btomorrow\b|\b明天\b/.test(phrase)) dayOffset = 1;
-  else if (/\btoday\b|\b今天\b/.test(phrase)) dayOffset = 0;
+  if (/\bday after tomorrow\b|\bin two days\b/.test(phrase) || phrase.includes('后天')) dayOffset = 2;
+  else if (/\btomorrow\b/.test(phrase) || phrase.includes('明天')) dayOffset = 1;
+  else if (/\btoday\b/.test(phrase) || phrase.includes('今天')) dayOffset = 0;
   else throw new Error('relativeDue must specify today, tomorrow, or the day after tomorrow');
 
   const english = phrase.match(/(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
@@ -243,12 +245,15 @@ export class JsonDailyRecordsReminders {
     const content = nonEmpty(input.content, 'content');
     const source = normalizeSource(input.source);
     const dueAt = input.dueAt === undefined ? resolveRelativeDue(input.relativeDue!, source) : validIso(input.dueAt, 'dueAt');
+    if (Date.parse(dueAt) <= Date.parse(source.receivedAt)) throw new Error('reminder time must be after the source message was received');
     if (input.recordId && !this.state.records.some((record) => record.id === input.recordId)) throw new Error('linked record does not exist');
     const existing = this.state.reminders.find((item) => item.operationId === operationId);
     if (existing) return structuredClone(existing);
     const reminder: DailyReminder = {
       id: randomUUID(), operationId, content, dueAt, status: 'scheduled', source,
-      ...(input.recordId ? { recordId: input.recordId } : {}), createdAt: source.receivedAt,
+      ...(input.recordId ? { recordId: input.recordId } : {}),
+      ...(input.deliveryTarget ? { deliveryTarget: { botId: nonEmpty(input.deliveryTarget.botId, 'botId', 100), chatId: nonEmpty(input.deliveryTarget.chatId, 'chatId', 300) } } : {}),
+      createdAt: source.receivedAt,
       updatedAt: source.receivedAt, deliveryAttempts: [],
     };
     this.mutate(() => { this.state.reminders.push(reminder); });
@@ -328,7 +333,18 @@ export class JsonDailyRecordsReminders {
     if (!this.filePath) return;
     mkdirSync(dirname(this.filePath), { recursive: true });
     const temporaryPath = `${this.filePath}.${randomUUID()}.tmp`;
-    writeFileSync(temporaryPath, `${JSON.stringify(this.state, null, 2)}\n`, { encoding: 'utf8', flag: 'wx' });
-    renameSync(temporaryPath, this.filePath);
+    const descriptor = openSync(temporaryPath, 'wx', 0o600);
+    try {
+      writeFileSync(descriptor, `${JSON.stringify(this.state, null, 2)}\n`, 'utf8');
+      fsyncSync(descriptor);
+    } finally {
+      closeSync(descriptor);
+    }
+    try {
+      renameSync(temporaryPath, this.filePath);
+    } catch (error) {
+      try { unlinkSync(temporaryPath); } catch { /* preserve the original rename failure */ }
+      throw error;
+    }
   }
 }

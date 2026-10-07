@@ -1,6 +1,6 @@
 # 日常记录、阅读与提醒
 
-- Status: blocked: 05-personal-entry-skills
+- Status: in-progress (broader entry integration blocked by 05)
 - Blocked by: 05-personal-entry-skills
 - Milestone: D
 - Spec: [spec.md](../spec.md)
@@ -14,3 +14,13 @@
 - 单次饮食/活动不自动变长期偏好；作者观点与本人意见区分；提醒重投不复活已取消任务；停机错过如实报告；回顾有时间范围和源记录且不写入永久画像。
 - 为本票契约补单元/集成测试；通过公开行为验证，不以内部函数调用次数为验收。
 - 完成后更新实现与验证说明；不触碰无关用户数据、生产配置或既有工作区。
+
+
+## Implementation status
+
+- Added the durable `JsonDailyRecordsReminders` core for dated daily, reading, and exploration records; source/receipt timestamps and timezones; scope changes; bounded recaps; and a separate reminder lifecycle with idempotency, edits, cancellation, delivery receipts, failure, missed recovery, and trusted-time relative date resolution.
+- Owner-only `/daily` and `/reminder` commands now save/review/re-scope records, create/edit/list/cancel reminders, and use the trusted message receipt time and local timezone. A date record never implicitly creates a reminder.
+- `PersonalReminderScheduler` restores future reminders, delivers to the originating private chat with an idempotency key, reports delivered only after a transport message ID is returned, persists failures, and marks overdue reminders missed after restart with an honest recovery notice.
+- Tests cover persistence, parser boundaries, private-chat authorization, timezones, explicit delivery receipts, missed recovery, and separation of records from reminders.
+- Verification: `pnpm test` (65/65), `pnpm build`, `git diff --check`. A scheduler test uses a due time safely beyond startup to avoid classifying a test-runner scheduling delay as a missed reminder.
+- Remaining: fuller natural-language capture/clarification, reading author-view vs user-view input controls, retry/edit UX for failed reminders, and review/summary integrations. Ticket remains in progress.

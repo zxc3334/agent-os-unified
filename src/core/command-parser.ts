@@ -8,6 +8,21 @@ export type SlashCommand =
   | { name: 'topics' }
   | { name: 'schedule'; request?: string }
   | { name: 'skills'; action: 'list' | 'enable' | 'disable'; skillId?: string }
+  | { name: 'career'; action: 'status' }
+  | { name: 'career'; action: 'evidence'; status: 'confirmed' | 'unconfirmed'; claim: string }
+  | { name: 'career'; action: 'role'; title: string; requirements: string[] }
+  | { name: 'career'; action: 'resume'; roleId: string; evidenceIds: string[] }
+  | { name: 'career'; action: 'approve'; resumeId: string }
+  | { name: 'career'; action: 'export'; resumeId: string }
+  | { name: 'career'; action: 'feedback'; resumeId: string; summary: string; weakPoint: string }
+  | { name: 'career'; action: 'review'; learningId: string; score: number }
+  | { name: 'daily'; action: 'list' }
+  | { name: 'daily'; action: 'add'; kind: 'daily' | 'reading' | 'exploration'; content: string }
+  | { name: 'daily'; action: 'recap'; from: string; through: string }
+  | { name: 'daily'; action: 'scope'; recordId: string; scopeId: string | null }
+  | { name: 'reminder'; action: 'list' }
+  | { name: 'reminder'; action: 'add' | 'edit'; reminderId?: string; due: string; content: string }
+  | { name: 'reminder'; action: 'cancel'; reminderId: string }
   | { name: 'memory'; action: 'review' | 'recent'; page: number }
   | { name: 'memory'; action: 'extract' | 'spaces' }
   | { name: 'memory'; action: 'scope'; spaceId: string }
@@ -20,6 +35,9 @@ const SCHEDULE_RE = /^(?:@.+?\s+)?\/schedule(?:\s+([\s\S]+?))?\s*$/;
 const SCHEDULES_RE = /^(?:@.+?\s+)?\/schedules\s*$/;
 const TOPICS_RE = /^(?:@.+?\s+)?\/topics\s*$/;
 const SKILLS_RE = /^(?:@.+?\s+)?\/skills(?:\s+([\s\S]+?))?\s*$/;
+const CAREER_RE = /^(?:@.+?\s+)?\/career(?:\s+([\s\S]+?))?\s*$/;
+const DAILY_RE = /^(?:@.+?\s+)?\/daily(?:\s+([\s\S]+?))?\s*$/;
+const REMINDER_RE = /^(?:@.+?\s+)?\/reminder(?:\s+([\s\S]+?))?\s*$/;
 const MEMORY_RE = /^(?:@.+?\s+)?\/memory(?:\s+([\s\S]+?))?\s*$/;
 const MEMORY_ID_RE = /^[a-zA-Z0-9_-]{1,100}$/;
 const CLI_REQUEST_RE = /^(?:@.+?\s+)?\/(agy|pi|claude|codex)(?:\s+([\s\S]*))?$/;
@@ -35,6 +53,52 @@ export function parseCommand(text: string): SlashCommand | undefined {
     if ((args[0] === 'enable' || args[0] === 'disable') && args.length === 2 && /^[a-z0-9-]{1,64}$/.test(args[1] ?? '')) {
       return { name: 'skills', action: args[0], skillId: args[1] };
     }
+    return undefined;
+  }
+  const dailyMatch = DAILY_RE.exec(value);
+  if (dailyMatch) {
+    const args = dailyMatch[1]?.trim() ?? '';
+    if (!args || args === 'list') return { name: 'daily', action: 'list' };
+    const add = /^add\s+(daily|reading|exploration)\s+([\s\S]+)$/.exec(args);
+    if (add?.[2]?.trim()) return { name: 'daily', action: 'add', kind: add[1] as 'daily' | 'reading' | 'exploration', content: add[2].trim() };
+    const recap = /^recap\s+(\d{4}-\d\d-\d\d)\s+(\d{4}-\d\d-\d\d)$/.exec(args);
+    if (recap) return { name: 'daily', action: 'recap', from: recap[1]!, through: recap[2]! };
+    const scope = /^scope\s+([a-zA-Z0-9_-]{1,100})\s+(none|[a-zA-Z0-9_-]{1,100})$/.exec(args);
+    if (scope) return { name: 'daily', action: 'scope', recordId: scope[1]!, scopeId: scope[2] === 'none' ? null : scope[2]! };
+    return undefined;
+  }
+  const reminderMatch = REMINDER_RE.exec(value);
+  if (reminderMatch) {
+    const args = reminderMatch[1]?.trim() ?? '';
+    if (!args || args === 'list') return { name: 'reminder', action: 'list' };
+    const cancel = /^cancel\s+([a-zA-Z0-9_-]{1,100})$/.exec(args);
+    if (cancel) return { name: 'reminder', action: 'cancel', reminderId: cancel[1]! };
+    const add = /^add\s+([\s\S]+?)\s*::\s*([\s\S]+)$/.exec(args);
+    if (add?.[1]?.trim() && add[2]?.trim()) return { name: 'reminder', action: 'add', due: add[1]!.trim(), content: add[2]!.trim() };
+    const edit = /^edit\s+([a-zA-Z0-9_-]{1,100})\s+([\s\S]+?)\s*::\s*([\s\S]+)$/.exec(args);
+    if (edit?.[2]?.trim() && edit[3]?.trim()) return { name: 'reminder', action: 'edit', reminderId: edit[1]!, due: edit[2]!.trim(), content: edit[3]!.trim() };
+    return undefined;
+  }
+  const careerMatch = CAREER_RE.exec(value);
+  if (careerMatch) {
+    const args = careerMatch[1]?.trim() ?? '';
+    if (!args || args === 'status') return { name: 'career', action: 'status' };
+    const evidence = /^(evidence)\s+(confirmed|unconfirmed)\s+([\s\S]+)$/.exec(args);
+    if (evidence?.[3]?.trim()) return { name: 'career', action: 'evidence', status: evidence[2] as 'confirmed' | 'unconfirmed', claim: evidence[3].trim() };
+    const role = /^role\s+([\s\S]+)$/.exec(args);
+    if (role?.[1]?.trim()) {
+      const [title, requirementsText = ''] = role[1].split(/\s+\|\s+/, 2);
+      const requirements = requirementsText.split(';').map((item) => item.trim()).filter(Boolean);
+      return { name: 'career', action: 'role', title: title!.trim(), requirements };
+    }
+    const resume = /^resume\s+([a-zA-Z0-9_-]{1,100})\s+([a-zA-Z0-9_,-]{1,500})$/.exec(args);
+    if (resume) return { name: 'career', action: 'resume', roleId: resume[1]!, evidenceIds: [...new Set(resume[2]!.split(',').filter(Boolean))] };
+    const approval = /^(approve|export)\s+([a-zA-Z0-9_-]{1,100})$/.exec(args);
+    if (approval) return { name: 'career', action: approval[1] as 'approve' | 'export', resumeId: approval[2]! };
+    const feedback = /^feedback\s+([a-zA-Z0-9_-]{1,100})\s+([\s\S]+?)\s*\|\s*([\s\S]+)$/.exec(args);
+    if (feedback?.[2]?.trim() && feedback[3]?.trim()) return { name: 'career', action: 'feedback', resumeId: feedback[1]!, summary: feedback[2].trim(), weakPoint: feedback[3].trim() };
+    const review = /^review\s+([a-zA-Z0-9_-]{1,100})\s+([0-5])$/.exec(args);
+    if (review) return { name: 'career', action: 'review', learningId: review[1]!, score: Number(review[2]) };
     return undefined;
   }
   const memoryMatch = MEMORY_RE.exec(value);

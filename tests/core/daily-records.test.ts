@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
@@ -26,6 +26,7 @@ test('dated records persist with source and adjustable scope; a date fact alone 
       scopeId: null,
     });
     assert.equal(record.createdAt, source.receivedAt);
+    assert.equal((await stat(file)).mode & 0o777, 0o600);
     assert.equal(record.scopeId, null);
     assert.deepEqual(store.listReminders(), []);
 
@@ -53,6 +54,7 @@ test('relative due dates use trusted receipt time and timezone, and reminder cre
   assert.equal(first.dueAt, '2026-10-09T01:00:00.000Z');
   assert.equal(store.createReminder(input).id, first.id);
   assert.equal(first.status, 'scheduled');
+  assert.equal(store.createReminder({ operationId: 'reminder-op-cn', content: 'Call home', relativeDue: '明天上午9点', source }).dueAt, '2026-10-08T01:00:00.000Z');
 });
 
 test('cancel and edit affect reminder status without deleting its linked record; cancellation is terminal on redelivery', async () => {

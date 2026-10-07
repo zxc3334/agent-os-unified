@@ -128,6 +128,8 @@ export class JsonCareerPreparation {
   constructor(private readonly filePath: string, private readonly now: () => Date = () => new Date()) {}
 
   async addEvidence(input: Omit<CareerEvidence, 'id' | 'createdAt'> & { id?: string; createdAt?: string }): Promise<CareerEvidence> {
+    requireText(input.claim, 'claim', 2_000);
+    if (input.sources.length < 1 || input.sources.length > 20) throw new Error('Evidence must have 1-20 source references');
     return this.mutate((state) => {
       const record: CareerEvidence = {
         ...copy(input), id: input.id ?? randomUUID(), createdAt: input.createdAt ?? this.now().toISOString(),
@@ -142,6 +144,9 @@ export class JsonCareerPreparation {
   }
 
   async saveRoleRequirements(input: Omit<RoleRequirements, 'id' | 'createdAt'> & { id?: string; createdAt?: string }): Promise<RoleRequirements> {
+    requireText(input.title, 'role title', 200);
+    if (input.requirements.length > 40) throw new Error('A role can have at most 40 requirements');
+    input.requirements.forEach((requirement) => requireText(requirement, 'requirement', 500));
     return this.mutate((state) => {
       const role: RoleRequirements = {
         ...copy(input), id: input.id ?? randomUUID(), createdAt: input.createdAt ?? this.now().toISOString(),
@@ -179,6 +184,22 @@ export class JsonCareerPreparation {
     return (await this.read()).resumes.find((version) => version.id === id);
   }
 
+  async renderResumeMarkdown(id: string): Promise<string | undefined> {
+    const state = await this.read();
+    const version = state.resumes.find((item) => item.id === id);
+    if (!version) return undefined;
+    const role = state.roles.find((item) => item.id === version.roleId);
+    const lines = [
+      `# Resume${role ? ` — ${role.title}` : ''}`,
+      '',
+      `Version: ${version.id} | Status: ${version.status}`,
+      '',
+      '## Experience and Projects',
+      ...(version.claims.length ? version.claims.map((claim) => `- ${claim.text}\n  - Evidence: ${claim.sources.map((source) => `${source.kind}:${source.id}${source.version ? `@${source.version}` : ''}${source.locator ? `#${source.locator}` : ''}`).join(', ')}`) : ['- No confirmed evidence included.']),
+    ];
+    return `${lines.join('\n')}\n`;
+  }
+
   async getActiveResumeVersion(): Promise<ResumeVersion | undefined> {
     const state = await this.read();
     return state.resumes.find((version) => version.id === state.activeResumeVersionId);
@@ -206,6 +227,8 @@ export class JsonCareerPreparation {
     feedback: MockInterviewFeedbackInput[];
     recordedAt?: string;
   }): Promise<{ interview: MockInterviewRecord; learningRecords: CareerLearningRecord[] }> {
+    if (input.feedback.length > 20) throw new Error('An interview can have at most 20 feedback items');
+    input.feedback.forEach((item) => { requireText(item.summary, 'feedback summary', 2_000); requireText(item.weakPoint, 'weak point', 2_000); });
     return this.mutate((state) => {
       const resume = state.resumes.find((item) => item.id === input.resumeVersionId);
       if (!resume) throw new Error(`Unknown resume version: ${input.resumeVersionId}`);
@@ -295,6 +318,12 @@ export class JsonCareerPreparation {
     });
     this.queue = pending.catch(() => undefined);
     return pending;
+  }
+}
+
+function requireText(value: string, field: string, maxLength: number): void {
+  if (typeof value !== 'string' || !value.trim() || Array.from(value).length > maxLength) {
+    throw new Error(`${field} must contain 1-${maxLength} characters`);
   }
 }
 

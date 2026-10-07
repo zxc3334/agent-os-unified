@@ -21,6 +21,10 @@ import type { Scheduler } from "./scheduler.js";
 import type { PersonalMemoryStore } from "../core/personal-memory.js";
 import type { MemoryExtractionWorker } from "../core/memory-worker.js";
 import { PERSONAL_SKILLS, type JsonPersonalSkillRegistry } from "../core/personal-skills.js";
+import type { JsonCareerPreparation } from "../core/career-preparation.js";
+import type { JsonDailyRecordsReminders } from "../core/daily-records.js";
+import { resolveRelativeDue } from "../core/daily-records.js";
+import type { PersonalReminderScheduler } from "./personal-reminder-scheduler.js";
 
 export type CommandOutcome = "handled" | "continue";
 
@@ -40,6 +44,9 @@ export async function handleSessionCommand(options: {
   trustedOwnerOpenId?: string;
   memoryExtractionWorker?: MemoryExtractionWorker;
   personalSkills?: JsonPersonalSkillRegistry;
+  careerPreparation?: JsonCareerPreparation;
+  dailyRecords?: JsonDailyRecordsReminders;
+  personalReminderScheduler?: PersonalReminderScheduler;
 }): Promise<CommandOutcome> {
   const {
     runtime,
@@ -57,6 +64,9 @@ export async function handleSessionCommand(options: {
     trustedOwnerOpenId,
     memoryExtractionWorker,
     personalSkills,
+    careerPreparation,
+    dailyRecords,
+    personalReminderScheduler,
   } = options;
 
   if (!isNew && cliRequest && cliRequest.cliId !== session.cliId) {
@@ -98,6 +108,133 @@ export async function handleSessionCommand(options: {
       }
     } catch (error) {
       await bot.reply(msg.messageId, `技能设置失败：${(error as Error).message}`, hasThread);
+    }
+    return "handled";
+  }
+
+  if (command?.name === "daily" || command?.name === "reminder") {
+    if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId || msg.chatType !== "p2p") {
+      await bot.reply(msg.messageId, "个人日常记录和提醒仅限所有者在私聊中使用。", hasThread);
+      return "handled";
+    }
+    if (!dailyRecords) {
+      await bot.reply(msg.messageId, "日常记录暂不可用，请检查本地存储配置。", hasThread);
+      return "handled";
+    }
+    const timezone = Intl.DateTimeFormat().resolvedOptions().timeZone || "UTC";
+    const source = { sourceId: msg.messageId, actorId: trustedOwnerOpenId, receivedAt: msg.receivedAt, timezone };
+    const safe = (value: string, max = 500) => Array.from(value.replace(/[\r\n\t\u0000-\u001f\u007f]/g, " ")).slice(0, max).join("");
+    try {
+      if (command.name === "daily") {
+        if (command.action === "add") {
+          const record = dailyRecords.createRecord({
+            operationId: `message:${msg.messageId}`, kind: command.kind,
+            date: localDateAt(msg.receivedAt, timezone), content: command.content,
+            source, scopeId: session.memorySpaceIds?.[0] ?? null,
+          });
+          await bot.reply(msg.messageId, `已保存${command.kind === "daily" ? "日常" : command.kind === "reading" ? "阅读" : "探索"}记录 [${record.id}]（${record.date}）。这只是带日期的记录，不会自动变成长久偏好或提醒。`, hasThread);
+        } else if (command.action === "scope") {
+          const record = dailyRecords.setRecordScope(command.recordId, command.scopeId);
+          await bot.reply(msg.messageId, record ? `记录 [${record.id}] 的归属已调整为「${record.scopeId ?? "未分类"}」。` : "没有找到这条记录。", hasThread);
+        } else {
+          const range = command.action === "recap"
+            ? { from: command.from, through: command.through }
+            : lastSevenDayRange(localDateAt(msg.receivedAt, timezone));
+          const recap = dailyRecords.recap(range);
+          const lines = recap.records.slice(-10).map((record) => `[${record.id}] ${record.date} ${record.kind}：${safe(record.content)}（来源 ${record.source.sourceId}；归属 ${record.scopeId ?? "未分类"}）`);
+          await bot.reply(msg.messageId, `${recap.from} 至 ${recap.through}，共 ${recap.records.length} 条记录：\n${lines.join("\n") || "无记录"}${recap.records.length > 10 ? "\n（仅显示最近 10 条）" : ""}`, hasThread);
+        }
+      } else if (command.action === "add") {
+        if (!personalReminderScheduler) throw new Error("提醒调度器尚未就绪");
+        const reminder = dailyRecords.createReminder({
+          operationId: `message:${msg.messageId}`, content: command.content, source,
+          relativeDue: command.due,
+          deliveryTarget: { botId: config.id, chatId: msg.chatId },
+        });
+        personalReminderScheduler.schedule(reminder);
+        await bot.reply(msg.messageId, `已持久化提醒 [${reminder.id}]：${reminder.content}；计划时间 ${reminder.dueAt}。`, hasThread);
+      } else if (command.action === "list") {
+        const reminders = dailyRecords.listReminders().filter((item) => item.source.actorId === trustedOwnerOpenId);
+        const lines = reminders.slice(-10).map((item) => `[${item.id}] ${item.status} ${item.dueAt}：${safe(item.content)}`);
+        await bot.reply(msg.messageId, lines.join("\n") || "尚无提醒记录。", hasThread);
+      } else if (command.action === "cancel") {
+        const reminder = dailyRecords.cancelReminder(command.reminderId, msg.receivedAt);
+        personalReminderScheduler?.cancel(command.reminderId);
+        await bot.reply(msg.messageId, reminder ? `提醒已取消；原日期事实或日常记录不会删除。` : "没有找到这条提醒。", hasThread);
+      } else {
+        const current = dailyRecords.getReminder(command.reminderId!);
+        if (!current) throw new Error("没有找到这条提醒");
+        const dueAt = resolveRelativeDue(command.due, source);
+        const updated = dailyRecords.editReminder(command.reminderId!, { dueAt, content: command.content, changedAt: msg.receivedAt });
+        if (!updated) throw new Error("提醒更新失败");
+        personalReminderScheduler?.schedule(updated);
+        await bot.reply(msg.messageId, `提醒已更新，新的计划时间为 ${updated.dueAt}。`, hasThread);
+      }
+    } catch (error) {
+      await bot.reply(msg.messageId, `日常记录/提醒操作失败，未确认成功：${safe((error as Error).message, 300)}`, hasThread);
+    }
+    return "handled";
+  }
+
+  if (command?.name === "career") {
+    if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId || msg.chatType !== "p2p") {
+      await bot.reply(msg.messageId, "求职资料仅限所有者在私聊中使用。", hasThread);
+      return "handled";
+    }
+    if (!careerPreparation) {
+      await bot.reply(msg.messageId, "求职资料暂不可用，请检查本地存储配置。", hasThread);
+      return "handled";
+    }
+    const safe = (value: string, max = 600) => Array.from(value.replace(/[\r\n\t\u0000-\u001f\u007f]/g, " ")).slice(0, max).join("");
+    try {
+      if (command.action === "status") {
+        const [roles, evidence, resumes, learning] = await Promise.all([
+          careerPreparation.listRoleRequirements(), careerPreparation.listEvidence(),
+          careerPreparation.getActiveResumeVersion(), careerPreparation.listLearningRecords(),
+        ]);
+        const lines = [
+          `岗位：${roles.length ? roles.map((role) => `${safe(role.title)} [${role.id}]`).join("；") : "尚未记录"}`,
+          `证据：${evidence.length ? evidence.map((item) => `${item.status === "confirmed" ? "✅" : "○"} ${safe(item.claim)} [${item.id}]`).join("；") : "尚未记录"}`,
+          `当前简历版本：${resumes ? `${resumes.id}（岗位 ${resumes.roleId}，${resumes.claims.length} 条主张）` : "尚未批准"}`,
+          `待复习反馈：${learning.filter((item) => item.reviewStatus === "needs-review").slice(0, 5).map((item) => `${safe(item.weakPoint)} [${item.id}]`).join("；") || "无"}`,
+          "命令：/career role <岗位> | <要求1;要求2>；/career evidence confirmed|unconfirmed <内容>；/career resume <岗位ID> <证据ID,...>；/career approve <版本ID>；/career export <版本ID>；/career feedback <版本ID> <表现> | <薄弱点>；/career review <反馈ID> <0-5>",
+        ];
+        await bot.reply(msg.messageId, lines.join("\n"), hasThread);
+      } else if (command.action === "evidence") {
+        const evidence = await careerPreparation.addEvidence({
+          claim: command.claim, status: command.status,
+          sources: [{ kind: command.status === "confirmed" ? "user-confirmation" : "other", id: msg.messageId }],
+        });
+        await bot.reply(msg.messageId, `已保存${command.status === "confirmed" ? "已确认" : "待核实"}求职事实 [${evidence.id}]。来源为本次私聊；未核实事实不会进入简历主张。`, hasThread);
+      } else if (command.action === "role") {
+        const role = await careerPreparation.saveRoleRequirements({
+          title: command.title, requirements: command.requirements,
+          source: { kind: "user-confirmation", id: msg.messageId },
+        });
+        await bot.reply(msg.messageId, `已保存岗位「${safe(role.title)}」[${role.id}]，记录要求 ${role.requirements.length} 项。`, hasThread);
+      } else if (command.action === "resume") {
+        const proposal = await careerPreparation.proposeResumeVersion({ roleId: command.roleId, evidenceIds: command.evidenceIds });
+        await bot.reply(msg.messageId, `简历草案 [${proposal.id}] 已生成：纳入 ${proposal.claims.length} 条已确认事实，排除 ${proposal.excludedEvidenceIds.length} 条未确认事实。请先检查证据，再用 /career approve ${proposal.id} 明确批准；当前正式版本没有改变。`, hasThread);
+      } else if (command.action === "approve") {
+        const approved = await careerPreparation.approveResumeVersion(command.resumeId, { approvedBy: trustedOwnerOpenId, approvedAt: msg.receivedAt });
+        await bot.reply(msg.messageId, `已明确批准简历版本 [${approved.id}]，它现在是当前正式版本。可用 /career export ${approved.id} 查看带来源的 Markdown。`, hasThread);
+      } else if (command.action === "export") {
+        const markdown = await careerPreparation.renderResumeMarkdown(command.resumeId);
+        if (!markdown) throw new Error("没有找到这个简历版本");
+        await bot.reply(msg.messageId, markdown.slice(0, 2_800), hasThread);
+      } else if (command.action === "feedback") {
+        const result = await careerPreparation.recordMockInterview({
+          resumeVersionId: command.resumeId,
+          feedback: [{ summary: command.summary, weakPoint: command.weakPoint, source: { kind: "mock-interview", id: msg.messageId } }],
+          recordedAt: msg.receivedAt,
+        });
+        await bot.reply(msg.messageId, `模拟面试反馈已保存为待复习记录 [${result.learningRecords[0]?.id}]，它不是已确认的项目事实。`, hasThread);
+      } else {
+        const record = await careerPreparation.recordLearningReview(command.learningId, { score: command.score, reviewedAt: msg.receivedAt });
+        await bot.reply(msg.messageId, `复习反馈已更新：${record.reviewRounds} 轮，最近评分 ${record.latestScore}。`, hasThread);
+      }
+    } catch (error) {
+      await bot.reply(msg.messageId, `求职资料操作失败，未确认成功：${safe((error as Error).message, 300)}`, hasThread);
     }
     return "handled";
   }
@@ -223,6 +360,9 @@ export async function handleSessionCommand(options: {
         "/memory spaces 查看个人记忆空间；/memory scope <空间ID|all> 设置本事项的记忆范围",
         "/memory extract 从当前项目待处理对话中恢复并执行学习记忆提取",
         "/skills 查看个人能力包；/skills enable|disable <id> 管理能力包",
+        "/career 查看求职准备；支持保存事实、岗位、简历草案审批和模拟面试反馈",
+        "/daily add daily|reading|exploration <内容> 记录生活；/daily list 回顾最近记录；/daily recap <开始日期> <结束日期>",
+        "/reminder add <今天/明天/后天 时间> :: <内容>；/reminder list；/reminder cancel <ID>",
         "/memory confirm <id>、/memory correct <id> <内容>、/memory reject <id>、/memory forget <id>",
         "/schedule pause <id> 暂停定时任务",
         "/schedule resume <id> 恢复定时任务",
@@ -483,4 +623,19 @@ export async function handleSessionCommand(options: {
   }
 
   return "continue";
+}
+
+
+function localDateAt(instant: string, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
+  }).formatToParts(new Date(instant));
+  const values = Object.fromEntries(parts.map((part) => [part.type, part.value]));
+  return `${values.year}-${values.month}-${values.day}`;
+}
+
+function lastSevenDayRange(today: string): { from: string; through: string } {
+  const end = new Date(`${today}T00:00:00.000Z`);
+  end.setUTCDate(end.getUTCDate() - 6);
+  return { from: end.toISOString().slice(0, 10), through: today };
 }

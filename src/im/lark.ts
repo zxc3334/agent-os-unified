@@ -123,6 +123,7 @@ export interface Bot {
     text: string,
     replyInThread?: boolean,
   ) => Promise<string | undefined>;
+  sendTextToChat: (chatId: string, text: string, uuid?: string) => Promise<string | undefined>;
   sendCardToChat: (
     chatId: string,
     card: CardJson,
@@ -298,6 +299,19 @@ export function startBot(opts: BotOptions): Bot {
           msg_type: 'post',
           content: JSON.stringify(buildMentionPostContent(target, text)),
           ...(replyInThread ? { reply_in_thread: true } : {}),
+        },
+      });
+      return res.data?.message_id;
+    },
+
+    async sendTextToChat(chatId, text, uuid) {
+      const res = await client.im.v1.message.create({
+        params: { receive_id_type: 'chat_id' },
+        data: {
+          receive_id: chatId,
+          msg_type: 'text',
+          content: JSON.stringify({ text: fitFeishuText(text, FEISHU_TEXT_LIMIT) }),
+          uuid: uuid || randomUUID(),
         },
       });
       return res.data?.message_id;
