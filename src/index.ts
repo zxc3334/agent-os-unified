@@ -51,7 +51,7 @@ import {
   findClarificationRequest,
   formatClarificationMessage,
 } from './core/clarification.js';
-import type { ProductSpecRequest } from './core/product-spec.js';
+import { findProductSpecRequest, type ProductSpecRequest } from './core/product-spec.js';
 import { JsonProductSpecFlowStore } from './core/product-spec-store.js';
 import { persistMemorySubmission } from './core/persist-memory.js';
 import { scanCandidates, buildTopicPrompt } from './core/topic-scanner.js';
@@ -106,7 +106,7 @@ import { startScheduleApi } from './app/schedule-api.js';
 import { startScheduleFileWatcher } from './app/schedule-watcher.js';
 import type { AppRuntime, BotRuntime } from './app/runtime.js';
 import { JsonUnifiedTaskStore, UnifiedTaskRuntime, conversationAffairId, workflowAffairId } from './app/unified-task-runtime.js';
-import type { CliRunResult } from './cli/types.js';
+import type { CliEvent, CliRunResult } from './cli/types.js';
 
 const botConfigPath = resolve(
   process.env.BOTS_CONFIG ?? join('config', 'bots.json'),
@@ -706,28 +706,46 @@ async function startConfiguredBot(
                   agentOsConfig.defaultProductDeliveryMode,
                   [personalSkillContext, personalTaskMemory.text, careerContext, memoryContext].filter(Boolean).join('\n\n'),
                 );
-                const result = await executeCli(
+                const onCliEvent = (event: CliEvent) => {
+                  if (
+                    event.type !== 'tool_start' &&
+                    event.type !== 'tool_end' &&
+                    event.type !== 'context'
+                  ) return;
+                  progress.accept(event);
+                  renderProgress();
+                };
+                const initialResult = await executeCli(
                   cliAdapter,
                   prompt,
                   session.workspaceDir,
                   session.cliSessionId,
                   signal,
                   ['request_approval'],
-                  (event) => {
-                    if (
-                      event.type !== 'tool_start' &&
-                      event.type !== 'tool_end' &&
-                      event.type !== 'context'
-                    )
-                      return;
-                    progress.accept(event);
-                    renderProgress();
-                  },
+                  onCliEvent,
                   cliEnv,
                 );
+                const managesProductSpec = config.skills.includes('to-spec')
+                  || config.skills.includes('lark-doc');
+                const finalResult = managesProductSpec
+                  ? (await ensureProductSpecSubmission({
+                      result: initialResult,
+                      defaultDeliveryMode: agentOsConfig.defaultProductDeliveryMode,
+                      retry: (retryPrompt, resultSessionId) => executeCli(
+                        cliAdapter,
+                        retryPrompt,
+                        session.workspaceDir,
+                        resultSessionId ?? session.cliSessionId,
+                        signal,
+                        [],
+                        onCliEvent,
+                        cliEnv,
+                      ),
+                    })).result
+                  : initialResult;
                 return {
-                  outcome: result.failedToolCalls ? 'partial' : 'succeeded',
-                  result,
+                  outcome: finalResult.failedToolCalls ? 'partial' : 'succeeded',
+                  result: finalResult,
                   artifacts: [],
                 };
               },
@@ -804,47 +822,11 @@ async function startConfiguredBot(
             );
             return;
           }
-          let finalResult = result;
-          let productSpecRequest: ProductSpecRequest | undefined;
-          const managesProductSpec = !isCompacting && (
-            config.skills.includes('to-spec')
-            || config.skills.includes('lark-doc')
-          );
-          if (managesProductSpec) {
-            const submission = await ensureProductSpecSubmission({
-              result,
-              defaultDeliveryMode: agentOsConfig.defaultProductDeliveryMode,
-              retry: (retryPrompt, resultSessionId) => executeCli(
-                cliAdapter,
-                retryPrompt,
-                session.workspaceDir,
-                resultSessionId ?? session.cliSessionId,
-                run.signal,
-                [],
-                (event) => {
-                  if (
-                    event.type !== 'tool_start'
-                    && event.type !== 'tool_end'
-                    && event.type !== 'context'
-                  ) return;
-                  progress.accept(event);
-                  renderProgress();
-                },
-                cliEnv,
-              ),
-            });
-            finalResult = submission.result;
-            productSpecRequest = submission.request;
-            if (finalResult.sessionId) {
-              await sessions.setCliSessionId(session.id, finalResult.sessionId);
-            }
-            if (finalResult.stats?.contextWindowTokens) {
-              contextWindows.set(
-                session.id,
-                finalResult.stats.contextWindowTokens,
-              );
-            }
-          }
+          const finalResult = result;
+          const productSpecRequest = !isCompacting
+            && (config.skills.includes('to-spec') || config.skills.includes('lark-doc'))
+            ? findProductSpecRequest(finalResult.toolCalls)
+            : undefined;
           const dispatchRequest = !isCompacting
             ? findDispatchTaskRequest(finalResult.toolCalls)
             : undefined;

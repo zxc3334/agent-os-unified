@@ -52,3 +52,11 @@
 - `runCli` now counts failed tool executions without retaining tool inputs/names in the run summary. Ordinary message and scheduled task adapters map this to `partially_succeeded`; the Feishu task card and completion notification distinguish partial work from full success and tell the user to verify/retry the incomplete portion.
 - Tests exercise failed/successful tool event streams and the partial card label. Remaining: the product-spec retry/continuation UI still needs reconciliation with its original task outcome; this is not a full matter-summary or end-to-end workflow solution.
 - Verification after this slice and the blog-revocation integration: `pnpm test` (107/107), `pnpm build`, `git diff --check`.
+
+
+### Product-spec retry reconciliation
+
+- Moved product-spec structured-submission retry into the unified task executor boundary. A successful retry's final CLI result and native session are now the persisted task result; a retry that still fails to produce a structured submission is persisted as a failed task rather than leaving an initial apparent success. The downstream submission handler consumes the already-reconciled result and no longer runs a second retry outside task persistence.
+- Added temporary-store tests verifying success result/session persistence across reopen and durable failed status for an unsuccessful retry.
+- Verification: `pnpm test` (129/129), `pnpm build`, `git diff --check`.
+- Remaining: cross-thread matter selection/continuation, concise authorized affair-summary carryover, live Feishu end-to-end verification for collaboration and continuations. Ticket remains in progress.
