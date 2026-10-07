@@ -15,6 +15,10 @@ function task(id: string, ownerId: string, trace = false): UnifiedTask {
     traceHistory: trace ? [{
       version: 1, taskId: id, source: 'message', sourceId: `source-${id}`, stage: 'failed',
       timestamp, artifactIds: ['artifact-1'], failureCode: 'execution_failed',
+      skillVersions: [{ id: 'career-interview', version: 1 }],
+      memoryOperations: [{ tool: 'save_personal_memory', operation: 'write', status: 'attempted' }],
+      memorySources: [{ id: 'mem-1', version: 2 }],
+      durationMs: 1200, usage: { totalTokens: 100, cost: 'unknown' },
     }] : [],
   };
 }
@@ -45,6 +49,11 @@ test('owner can list recent personal tasks and inspect content-free trace steps'
   assert.match(trace, /execution_failed/);
   assert.match(trace, /source-task-private/);
   assert.match(trace, /artifact-1/);
+  assert.match(trace, /career-interview@1/);
+  assert.match(trace, /记忆操作 write:save_personal_memory/);
+  assert.match(trace, /使用记忆 mem-1@v2/);
+  assert.match(trace, /耗时 1200ms/);
+  assert.match(trace, /费用未知/);
   assert.doesNotMatch(trace, /PRIVATE-INPUT-MARKER|PRIVATE-RESULT-MARKER/);
 });
 

@@ -301,8 +301,19 @@ export async function handleSessionCommand(options: {
           return "handled";
         }
         const lines = task.traceHistory.slice(-12).map((event) => {
-          const detail = [event.sourceId ? `来源 ${event.sourceId}` : undefined, event.artifactIds.length ? `产物 ${event.artifactIds.join(", ")}` : undefined, event.failureCode ? `失败阶段 ${event.failureCode}` : undefined]
-            .filter(Boolean).join("；");
+          const usage = event.usage
+            ? `用量 ${event.usage.totalTokens === undefined ? "未知" : `${event.usage.totalTokens} tokens`}；费用未知`
+            : undefined;
+          const detail = [
+            event.sourceId ? `来源 ${event.sourceId}` : undefined,
+            event.artifactIds.length ? `产物 ${event.artifactIds.join(", ")}` : undefined,
+            event.skillVersions?.length ? `技能 ${event.skillVersions.map((skill) => `${skill.id}@${skill.version}`).join(", ")}` : undefined,
+            event.memoryOperations?.length ? `记忆操作 ${event.memoryOperations.map((item) => `${item.operation}:${item.tool}`).join(", ")}（仅记录调用）` : undefined,
+            event.memorySources?.length ? `使用记忆 ${event.memorySources.map((item) => `${item.id}@v${item.version}`).join(", ")}` : undefined,
+            event.durationMs === undefined ? undefined : `耗时 ${event.durationMs}ms`,
+            usage,
+            event.failureCode ? `失败阶段 ${event.failureCode}` : undefined,
+          ].filter(Boolean).join("；");
           return `${event.timestamp} · ${event.stage}${detail ? ` · ${detail}` : ""}`;
         });
         await bot.reply(msg.messageId, `事项 ${task.id} · ${task.status}\n${lines.join("\n") || "还没有可查看的轨迹步骤。"}\n这里只展示步骤、来源/产物标识和失败阶段，不包含原始提示词或执行内容。`, hasThread);

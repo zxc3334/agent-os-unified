@@ -88,6 +88,45 @@ test('one task run passes trusted scope to memory and executor and persists obse
   });
 });
 
+test('trace records selected skill versions, attempted memory operations, duration, and unknown cost without content', async () => {
+  await withStore(async (filePath) => {
+    let second = 0;
+    const start = Date.parse(fixedTime);
+    const runtime = new UnifiedTaskRuntime({
+      store: new JsonUnifiedTaskStore(filePath),
+      id: () => 'trace-metadata-run',
+      now: () => new Date(start + second++ * 1_000).toISOString(),
+      memoryContext: { async prepare() { return { secret: 'private context' }; }, traceReferences() { return [{ id: 'mem-1', version: 2 }]; } },
+      executor: {
+        async execute() {
+          return {
+            outcome: 'succeeded', result: { secret: 'private result' }, artifacts: [],
+            usage: { inputTokens: 80, outputTokens: 20, totalTokens: 100 },
+            memoryOperations: [
+              { tool: 'save_personal_memory', operation: 'write', status: 'attempted' },
+              { tool: 'fake_tool', operation: 'delete', status: 'attempted' },
+            ],
+          };
+        },
+      },
+    });
+    const task = await runtime.run({
+      ...request(), skillVersions: [{ id: 'career-interview', version: 1 }],
+    });
+    const terminal = task.traceHistory.at(-1)!;
+    assert.deepEqual(task.skillVersions, [{ id: 'career-interview', version: 1 }]);
+    assert.deepEqual(terminal.skillVersions, [{ id: 'career-interview', version: 1 }]);
+    assert.deepEqual(task.traceHistory.find((event) => event.stage === 'context_prepared')?.memorySources, [{ id: 'mem-1', version: 2 }]);
+    assert.deepEqual(terminal.memoryOperations, [
+      { tool: 'save_personal_memory', operation: 'write', status: 'attempted' },
+    ]);
+    assert.equal(terminal.durationMs, 2_000);
+    assert.deepEqual(terminal.usage, { totalTokens: 100, inputTokens: 80, outputTokens: 20, cost: 'unknown' });
+    const persisted = await new JsonUnifiedTaskStore(filePath).get(task.id);
+    assert.doesNotMatch(JSON.stringify(persisted?.traceHistory), /private context|private result/);
+  });
+});
+
 test('executor output cannot replace trusted identity or expand authorized memory spaces', async () => {
   await withStore(async (filePath) => {
     const runtime = new UnifiedTaskRuntime({
@@ -218,6 +257,7 @@ test('private-safe trace exposes lifecycle and opaque source/artifact identifier
     }
     assert.equal(traceJson.includes('message-opaque-42'), true);
     assert.equal(traceJson.includes('artifact-resume-v2'), true);
+    assert.deepEqual((trace as Array<{ stage: string; usage?: unknown }>).at(-1)?.usage, { cost: 'unknown' });
   });
 });
 

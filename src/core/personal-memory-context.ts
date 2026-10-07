@@ -16,7 +16,7 @@ export interface PersonalMemoryContextRequest {
 
 export type PersonalMemoryContextResult =
   | { status: 'not_authorized' | 'empty'; text: '' }
-  | { status: 'ready'; text: string };
+  | { status: 'ready'; text: string; sourceVersions: Array<{ id: string; version: number }> };
 
 /**
  * Produce a small, read-only background snapshot for one task. Authorization is
@@ -29,10 +29,10 @@ export async function preparePersonalMemoryContext(
   if (!request.directMessage || request.actorId !== request.trustedOwnerId) {
     return { status: 'not_authorized', text: '' };
   }
-  const text = await store.formatContext(request.query, {
+  const context = await store.formatContextWithSources(request.query, {
     authorizedSpaceIds: [...new Set(request.authorizedSpaceIds)],
     maxEntries: request.maxEntries ?? 5,
     maxCharacters: request.maxCharacters ?? 3_000,
   });
-  return text ? { status: 'ready', text } : { status: 'empty', text: '' };
+  return context.text ? { status: 'ready', ...context } : { status: 'empty', text: '' };
 }

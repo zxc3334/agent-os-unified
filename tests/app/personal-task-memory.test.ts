@@ -35,6 +35,7 @@ test('task memory provider recalls only explicitly authorized owner-DM context',
     });
     assert.equal(context.status, 'ready');
     assert.match(context.text, /任务调度模块/);
+    assert.deepEqual(context.sourceVersions, [{ id: (await store.search('任务调度模块', { authorizedSpaceIds: [spaceId] }))[0]!.id, version: 1 }]);
   });
 });
 

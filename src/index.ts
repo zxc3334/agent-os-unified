@@ -99,6 +99,7 @@ import {
 import { assertProductSpecDocuments } from './app/product-spec-documents.js';
 import { executeCli } from './app/cli-execution.js';
 import { handleSessionCommand } from './app/command-handler.js';
+import { summarizeMemoryToolCalls } from './app/task-trace.js';
 import { sendResultNotification } from './app/notification-service.js';
 import { markSessionIdle } from './app/session-view.js';
 import { runProductDocumentComment } from './app/product-comment-runner.js';
@@ -108,7 +109,7 @@ import { Scheduler } from './app/scheduler.js';
 import { startScheduleApi } from './app/schedule-api.js';
 import { startScheduleFileWatcher } from './app/schedule-watcher.js';
 import type { AppRuntime, BotRuntime } from './app/runtime.js';
-import { JsonUnifiedTaskStore, UnifiedTaskRuntime, conversationAffairId, workflowAffairId } from './app/unified-task-runtime.js';
+import { JsonUnifiedTaskStore, UnifiedTaskRuntime, conversationAffairId, workflowAffairId, type TaskMemoryOperation } from './app/unified-task-runtime.js';
 import { JsonPersonalAffairStore, formatAffairSummaryContext } from './core/affairs.js';
 import type { CliEvent, CliRunResult } from './cli/types.js';
 
@@ -475,10 +476,11 @@ async function startConfiguredBot(
             return [];
           });
       }
-      const personalSkillContext = await personalSkills.promptFor(taskText).catch((error) => {
+      const personalSkillSelection = await personalSkills.selectionFor(taskText).catch((error) => {
         console.warn('[个人技能] 读取失败:', (error as Error).message);
-        return '';
+        return { prompt: '', versions: [] };
       });
+      const personalSkillContext = personalSkillSelection.prompt;
       const careerContext = personalMemoryStore
         && msg.chatType === 'p2p'
         && msg.senderOpenId === configuredOwnerOpenId
@@ -810,6 +812,12 @@ async function startConfiguredBot(
                   outcome: finalResult.failedToolCalls ? 'partial' : 'succeeded',
                   result: finalResult,
                   artifacts: [],
+                  memoryOperations: summarizeMemoryToolCalls(finalResult.toolCalls),
+                  ...(finalResult.stats ? { usage: {
+                    ...(finalResult.stats.totalTokens === undefined ? {} : { totalTokens: finalResult.stats.totalTokens }),
+                    ...(finalResult.stats.inputTokens === undefined ? {} : { inputTokens: finalResult.stats.inputTokens }),
+                    ...(finalResult.stats.outputTokens === undefined ? {} : { outputTokens: finalResult.stats.outputTokens }),
+                  } } : {}),
                 };
               },
             },
@@ -822,6 +830,7 @@ async function startConfiguredBot(
               occurredAt: msg.receivedAt,
             },
             authorizedMemorySpaceIds: authorizedPersonalSpaceIds,
+            skillVersions: personalSkillSelection.versions,
             memoryQuery: taskText,
             // Keep the durable task record minimal; raw prompt text stays in the
             // existing execution/session path rather than the task trace.

@@ -3,7 +3,7 @@ import type { PersonalMemoryStore } from '../core/personal-memory.js';
 import { preparePersonalMemoryContext } from '../core/personal-memory-context.js';
 
 export type TaskPersonalMemoryContext =
-  | { status: 'ready'; text: string }
+  | { status: 'ready'; text: string; sourceVersions: Array<{ id: string; version: number }> }
   | { status: 'empty' | 'not_authorized'; text: '' }
   | { status: 'unavailable'; text: string };
 
@@ -14,6 +14,10 @@ export class PersonalTaskMemoryProvider implements TaskMemoryContextProvider<Tas
     directMessage: boolean;
   }) {}
 
+  traceReferences(context: TaskPersonalMemoryContext) {
+    return context.status === 'ready' ? context.sourceVersions : [];
+  }
+
   async prepare(request: PrepareTaskMemoryContext): Promise<TaskPersonalMemoryContext> {
     if (!this.options.store) return { status: 'empty', text: '' };
     // A missing query is not permission to inject a broad/recency-based dump.
@@ -22,7 +26,7 @@ export class PersonalTaskMemoryProvider implements TaskMemoryContextProvider<Tas
       return { status: 'empty', text: '' };
     }
     try {
-      return await preparePersonalMemoryContext(this.options.store, {
+      const prepared = await preparePersonalMemoryContext(this.options.store, {
         actorId: request.actorId,
         trustedOwnerId: request.ownerId,
         directMessage: this.options.directMessage,
@@ -31,6 +35,8 @@ export class PersonalTaskMemoryProvider implements TaskMemoryContextProvider<Tas
         maxEntries: 5,
         maxCharacters: 3_000,
       });
+      if (prepared.status !== 'ready') return prepared;
+      return prepared;
     } catch (error) {
       console.warn('[个人记忆] 任务上下文读取失败:', (error as Error).message);
       return {

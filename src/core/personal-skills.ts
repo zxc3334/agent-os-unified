@@ -5,6 +5,7 @@ import { z } from 'zod';
 export const PERSONAL_SKILLS = [
   {
     id: 'career-interview',
+    version: 1,
     name: '求职与项目面试',
     description: '基于真实简历和项目事实做项目深挖、模拟面试、追问和薄弱点总结。',
     triggers: ['简历', '求职', '实习', '面试', '模拟面试', '项目复习', '项目深挖'],
@@ -16,6 +17,7 @@ export const PERSONAL_SKILLS = [
   },
   {
     id: 'reading-notes',
+    version: 1,
     name: '阅读与读书记录',
     description: '整理阅读材料、作者观点和用户自己的理解、赞同或反对。',
     triggers: ['读书', '阅读', '读后感', '书摘', '作者观点', '读了', '这本书'],
@@ -27,6 +29,7 @@ export const PERSONAL_SKILLS = [
   },
   {
     id: 'research-writing',
+    version: 1,
     name: 'AI 技术探索与博客',
     description: '从问题、个人立场和可核验材料开始，产出有来源的探索笔记、文章大纲或草稿。',
     triggers: ['博客', '写文章', '技术探索', '调研', '新技术', 'agent', '大模型', 'AI 技术'],
@@ -39,6 +42,7 @@ export const PERSONAL_SKILLS = [
   },
   {
     id: 'daily-records',
+    version: 1,
     name: '日常记录与回顾',
     description: '低打扰地记录生活事件，并按用户指定范围进行有来源的回顾。',
     triggers: ['日常记录', '今天做了', '今天吃了', '午饭', '锻炼', '健身', '本周回顾', '这周总结'],
@@ -93,17 +97,26 @@ export class JsonPersonalSkillRegistry {
     });
   }
 
-  async promptFor(input: string): Promise<string> {
+  async selectionFor(input: string): Promise<{
+    prompt: string;
+    versions: Array<{ id: PersonalSkillId; version: number }>;
+  }> {
     const normalized = input.normalize('NFKC').toLocaleLowerCase();
     const enabled = new Set((await this.read()).enabled);
     const selected = PERSONAL_SKILLS.filter((skill) =>
       enabled.has(skill.id) && skill.triggers.some((trigger) => normalized.includes(trigger.toLocaleLowerCase())),
     );
-    if (!selected.length) return '';
-    return [
-      '【本次个人能力包】这些能力包只提供做事方法，不增加工具、权限或记忆空间访问范围。',
-      ...selected.map((skill) => `- ${skill.name}：${skill.guidance.join(' ')}`),
-    ].join('\n');
+    return {
+      prompt: selected.length ? [
+        '【本次个人能力包】这些能力包只提供做事方法，不增加工具、权限或记忆空间访问范围。',
+        ...selected.map((skill) => `- ${skill.name}：${skill.guidance.join(' ')}`),
+      ].join('\n') : '',
+      versions: selected.map(({ id, version }) => ({ id, version })),
+    };
+  }
+
+  async promptFor(input: string): Promise<string> {
+    return (await this.selectionFor(input)).prompt;
   }
 
   private async read(): Promise<PersonalSkillState> {

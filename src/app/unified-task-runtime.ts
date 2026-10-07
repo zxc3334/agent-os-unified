@@ -69,6 +69,19 @@ export type UnifiedTaskTraceStage =
  * particular it never contains task input, memory text, progress text, result,
  * artifact labels/locations, or exception messages.
  */
+export interface TaskSkillVersion { id: string; version: number }
+export interface TaskMemorySourceVersion { id: string; version: number }
+export interface TaskMemoryOperation {
+  tool: string;
+  operation: 'read' | 'write' | 'delete' | 'feedback';
+  status: 'attempted';
+}
+export interface TaskUsage {
+  totalTokens?: number;
+  inputTokens?: number;
+  outputTokens?: number;
+}
+
 export interface UnifiedTaskTraceEvent {
   version: 1;
   taskId: string;
@@ -77,6 +90,11 @@ export interface UnifiedTaskTraceEvent {
   stage: UnifiedTaskTraceStage;
   timestamp: string;
   artifactIds: string[];
+  skillVersions?: TaskSkillVersion[];
+  memoryOperations?: TaskMemoryOperation[];
+  memorySources?: TaskMemorySourceVersion[];
+  durationMs?: number;
+  usage?: TaskUsage & { cost: 'unknown' };
   failureCode?: 'memory_context_unavailable' | 'execution_failed';
 }
 
@@ -91,6 +109,8 @@ export interface UnifiedTask {
   affairId: string;
   trigger: UnifiedTaskTrigger;
   authorizedMemorySpaceIds: string[];
+  /** Skill IDs/versions selected by trusted host logic; no skill can add permissions. */
+  skillVersions: TaskSkillVersion[];
   input: unknown;
   status: UnifiedTaskStatus;
   createdAt: string;
@@ -125,6 +145,8 @@ export interface PrepareTaskMemoryContext {
 /** The provider must honor only the explicitly supplied authorized spaces. */
 export interface TaskMemoryContextProvider<Context = unknown> {
   prepare(request: PrepareTaskMemoryContext): Promise<Context>;
+  /** Return only stable IDs/versions, never context text or query terms. */
+  traceReferences?(context: Context): readonly TaskMemorySourceVersion[];
 }
 
 export interface ExecuteUnifiedTask<Context = unknown> {
@@ -138,6 +160,9 @@ export interface UnifiedTaskExecution {
   outcome: 'succeeded' | 'partial';
   result: unknown;
   artifacts: TaskArtifact[];
+  /** Content-free records from the adapter; only an allowlisted tool name and attempted operation. */
+  memoryOperations?: readonly TaskMemoryOperation[];
+  usage?: TaskUsage;
 }
 
 export interface UnifiedTaskExecutor<Context = unknown> {
@@ -150,6 +175,7 @@ export interface RunUnifiedTaskInput {
   trigger: UnifiedTaskTrigger;
   /** Authorization is supplied by trusted application code, never by model output. */
   authorizedMemorySpaceIds: readonly string[];
+  skillVersions?: readonly TaskSkillVersion[];
   input: unknown;
   /** Ephemeral query used for scoped context preparation; never persisted in the task record. */
   memoryQuery?: string;
@@ -171,9 +197,9 @@ export interface UnifiedTaskRuntimeOptions<Context = unknown> {
  * callers. It owns task lifecycle, authorization propagation, cancellation and
  * durable outcome reporting; transport and model/CLI details stay in adapters.
  *
- * Ordinary messages, scheduled runs, and approval/clarification/comment
- * continuations adapt existing execution paths through this seam. Collaboration
- * and affair-native-session isolation remain separate integration work. Adapters
+ * Ordinary messages, scheduled runs, collaboration, and approval/clarification/comment
+ * continuations adapt existing execution paths through this seam. Matter selection
+ * and native-session isolation remain responsibilities of the session layer. Adapters
  * preserve their existing delivery and native-session behavior; callers derive
  * authority before entering this module, and executor/model output is only stored
  * as result data, never re-read as identity or permission.
@@ -202,6 +228,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
       affairId: request.affairId,
       trigger: { ...request.trigger },
       authorizedMemorySpaceIds: [...new Set(request.authorizedMemorySpaceIds)],
+      skillVersions: sanitizeSkillVersions(request.skillVersions ?? []),
       input: clone(request.input),
       status: 'queued',
       createdAt: timestamp,
@@ -233,7 +260,9 @@ export class UnifiedTaskRuntime<Context = unknown> {
         ...(request.memoryQuery === undefined ? {} : { query: request.memoryQuery }),
         signal: request.signal,
       });
-      task = await this.trace(task, 'context_prepared');
+      let memorySources: readonly TaskMemorySourceVersion[] = [];
+      try { memorySources = this.options.memoryContext.traceReferences?.(memoryContext) ?? []; } catch { /* diagnostics are best effort */ }
+      task = await this.trace(task, 'context_prepared', undefined, undefined, { memorySources });
       phase = 'execution';
       if (request.signal.aborted) {
         task = await this.finish(task, 'cancelled', observe);
@@ -264,7 +293,10 @@ export class UnifiedTaskRuntime<Context = unknown> {
           ? 'partially_succeeded'
           : 'succeeded';
       task = await this.finish(task, status, observe);
-      task = await this.trace(task, status === 'cancelled' ? 'cancelled' : 'completed');
+      task = await this.trace(task, status === 'cancelled' ? 'cancelled' : 'completed', undefined, undefined, {
+        memoryOperations: execution.memoryOperations,
+        usage: execution.usage,
+      });
       return clone(task);
     } catch (error) {
       const cancelled = request.signal.aborted || isAbortError(error);
@@ -324,6 +356,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
     stage: UnifiedTaskTraceStage,
     artifactIds: readonly string[] = task.artifacts.map(({ id }) => id),
     failureCode?: UnifiedTaskTraceEvent['failureCode'],
+    metadata: { memoryOperations?: readonly TaskMemoryOperation[]; memorySources?: readonly TaskMemorySourceVersion[]; usage?: TaskUsage } = {},
   ): Promise<UnifiedTask> {
     const taskId = safeIdentifier(task.id);
     const sourceId = task.trigger.sourceId === undefined
@@ -340,6 +373,13 @@ export class UnifiedTaskRuntime<Context = unknown> {
         const safe = safeIdentifier(id);
         return safe === undefined ? [] : [safe];
       }),
+      ...(task.skillVersions.length ? { skillVersions: task.skillVersions.map((skill) => ({ ...skill })) } : {}),
+      ...((metadata.memoryOperations?.length ?? 0) > 0 ? { memoryOperations: sanitizeMemoryOperations(metadata.memoryOperations ?? []) } : {}),
+      ...((metadata.memorySources?.length ?? 0) > 0 ? { memorySources: sanitizeMemorySources(metadata.memorySources ?? []) } : {}),
+      ...(isTerminalTraceStage(stage) ? {
+        ...(elapsedMilliseconds(task.startedAt, task.completedAt) === undefined ? {} : { durationMs: elapsedMilliseconds(task.startedAt, task.completedAt) }),
+        usage: sanitizeUsage(metadata.usage),
+      } : {}),
       ...(failureCode === undefined ? {} : { failureCode }),
     };
     const traced = { ...task, traceHistory: [...task.traceHistory, event] };
@@ -462,7 +502,7 @@ function parseTask(value: unknown): UnifiedTask {
   ) {
     throw new Error('任务文件包含无效记录');
   }
-  return clone({ ...task, traceHistory: Array.isArray(task.traceHistory) ? task.traceHistory : [] });
+  return clone({ ...task, skillVersions: Array.isArray(task.skillVersions) ? task.skillVersions : [], traceHistory: Array.isArray(task.traceHistory) ? task.traceHistory : [] });
 }
 
 function clone<T>(value: T): T {
@@ -479,6 +519,63 @@ function errorMessage(error: unknown): string {
 
 function safeIdentifier(value: string): string | undefined {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) ? value : undefined;
+}
+
+function sanitizeSkillVersions(skills: readonly TaskSkillVersion[]): TaskSkillVersion[] {
+  const seen = new Set<string>();
+  return skills.flatMap((skill) => {
+    if (!skill || typeof skill.id !== 'string' || !/^[a-z0-9][a-z0-9._-]{0,63}$/i.test(skill.id)
+      || !Number.isSafeInteger(skill.version) || skill.version < 1 || seen.has(skill.id)) return [];
+    seen.add(skill.id);
+    return [{ id: skill.id, version: skill.version }];
+  }).slice(0, 20);
+}
+function sanitizeMemoryOperations(operations: readonly TaskMemoryOperation[]): TaskMemoryOperation[] {
+  const allowed: Record<string, TaskMemoryOperation['operation']> = {
+    save_memory: 'write',
+    save_personal_memory: 'write',
+    search_personal_memory: 'read',
+    capture_daily_record: 'write',
+    search_daily_records: 'read',
+    delete_daily_record: 'delete',
+    save_career_interview_feedback: 'feedback',
+  };
+  const seen = new Set<string>();
+  return operations.flatMap(({ tool, operation }) => {
+    if (allowed[tool] !== operation || seen.has(tool)) return [];
+    seen.add(tool);
+    return [{ tool, operation, status: 'attempted' as const }];
+  }).slice(0, 20);
+}
+function sanitizeMemorySources(sources: readonly TaskMemorySourceVersion[]): TaskMemorySourceVersion[] {
+  const seen = new Set<string>();
+  return sources.flatMap(({ id, version }) => {
+    if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(id)
+      || !Number.isSafeInteger(version) || version < 1 || seen.has(id)) return [];
+    seen.add(id);
+    return [{ id, version }];
+  }).slice(0, 10);
+}
+function sanitizeUsage(usage?: TaskUsage): UnifiedTaskTraceEvent['usage'] {
+  const valid = (value: number | undefined): number | undefined =>
+    Number.isSafeInteger(value) && value! >= 0 ? value : undefined;
+  const totalTokens = valid(usage?.totalTokens);
+  const inputTokens = valid(usage?.inputTokens);
+  const outputTokens = valid(usage?.outputTokens);
+  return {
+    ...(totalTokens === undefined ? {} : { totalTokens }),
+    ...(inputTokens === undefined ? {} : { inputTokens }),
+    ...(outputTokens === undefined ? {} : { outputTokens }),
+    cost: 'unknown',
+  };
+}
+function isTerminalTraceStage(stage: UnifiedTaskTraceStage): boolean {
+  return stage === 'completed' || stage === 'failed' || stage === 'cancelled';
+}
+function elapsedMilliseconds(startedAt?: string, completedAt?: string): number | undefined {
+  if (!startedAt || !completedAt) return undefined;
+  const elapsed = Date.parse(completedAt) - Date.parse(startedAt);
+  return Number.isFinite(elapsed) && elapsed >= 0 ? elapsed : undefined;
 }
 
 function safeSource(value: UnifiedTaskSource): UnifiedTaskTraceEvent['source'] {

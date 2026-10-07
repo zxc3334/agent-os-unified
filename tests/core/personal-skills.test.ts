@@ -21,6 +21,9 @@ test('personal skill packs require explicit enablement and only add scoped guida
     assert.match(guidance, /薄弱点和建议复习问题/);
     assert.match(guidance, /明确要求保存或明确同意后调用 save_career_interview_feedback/);
     assert.equal(await registry.isSelectedFor('career-interview', '请根据简历做模拟面试'), true);
+    assert.deepEqual(await registry.selectionFor('请根据简历做模拟面试'), {
+      prompt: guidance, versions: [{ id: 'career-interview', version: 1 }],
+    });
     assert.equal(await registry.isSelectedFor('career-interview', '帮我记录午饭'), false);
     assert.doesNotMatch(guidance, /阅读与读书记录/);
 
