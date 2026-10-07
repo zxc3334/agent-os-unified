@@ -42,7 +42,7 @@
 - Scheduled runs now use the same context-preparation seam, but deliberately receive an empty authorized-space list. Existing scheduled-task records store creator and chat identity, not the originating matter's memory-space grant; identity alone is not permission. Do not infer a grant from chat ID, target bot, workspace, or schedule ownership. Extend only after a trusted matter-level grant is durably represented and safely propagated.
 - Document-comment events carry no comment body, so they do not perform broad/empty-query recall; they remain empty unless a meaningful trusted query becomes available.
 - Public behavior tests exercise a continuation prompt receiving only memory in its explicit session grant, excluding other spaces, and a continuation with no grant receiving no memory. Existing provider tests cover non-owner/group denial and empty grants.
-- Verification: focused continuation and memory-context tests pass; `pnpm build` and `git diff --check` pass. Ticket 05 remains in progress: scheduled-task grant persistence, cross-thread affair selection/continuation, and broader end-to-end Feishu flow validation remain open.
+- Verification: focused continuation and memory-context tests pass; `pnpm build` and `git diff --check` pass. Ticket 05 remains in progress: cross-thread affair selection/continuation and broader end-to-end Feishu flow validation remain open. (Scheduled-task grant persistence was subsequently implemented and is recorded below.)
 
 
 ### Durable scheduled-task memory grant
