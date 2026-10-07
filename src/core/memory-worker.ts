@@ -1,5 +1,12 @@
 import { basename } from 'node:path';
 import {
+  advanceCursors,
+  beginExtractionBatch,
+  freezeSourceCandidates,
+  markCandidateCommitted,
+  type DialogueRecord,
+} from './dialogue-store.js';
+import {
   bootstrapMemoryIndexIfEmpty,
   calculateNextReview,
   dropMemoryCardEntry,
@@ -303,6 +310,14 @@ ${dialogueContent}
   }
 }
 
+function normalizeCandidates(
+  candidates: ExtractedMemoryPayload | ExtractedMemoryPayload[] | undefined,
+): ExtractedMemoryPayload[] {
+  if (!candidates) return [];
+  return (Array.isArray(candidates) ? candidates : [candidates])
+    .filter((candidate) => candidate && candidate.should_record && candidate.action !== 'skip');
+}
+
 /**
  * 专职后台记忆提取 Worker
  */
@@ -318,6 +333,45 @@ export class MemoryExtractionWorker {
   constructor(options: MemoryWorkerOptions = {}) {
     this.baseDir = options.baseDir;
     this.llmExtractor = options.llmExtractor || defaultDeepSeekExtractor;
+  }
+
+  /**
+   * Process the next frozen dialogue batch. Candidate persistence receives a stable
+   * operation id and must be idempotent, including the crash window between the
+   * side effect and recording its completion marker.
+   */
+  async processDialogueBatch(
+    project: string,
+    extract: (record: DialogueRecord) => Promise<ExtractedMemoryPayload | ExtractedMemoryPayload[] | undefined>,
+    persist: (candidate: ExtractedMemoryPayload, operationId: string, record: DialogueRecord) => Promise<void>,
+  ): Promise<{ batchId: string; completedSources: number; cursor: number } | undefined> {
+    const batch = await beginExtractionBatch(project);
+    if (!batch) return undefined;
+
+    for (const source of batch.sources) {
+      if (source.completed) continue;
+      const extraction = source.candidates === undefined
+        ? normalizeCandidates(await extract(source.record))
+        : source.candidates as ExtractedMemoryPayload[];
+      const candidates = await freezeSourceCandidates(batch.id, source.index, extraction);
+      const latestBatch = await beginExtractionBatch(project);
+      const committedIndexes = new Set(
+        latestBatch?.sources.find((item) => item.index === source.index)?.committedCandidateIndexes ?? [],
+      );
+
+      for (let index = 0; index < candidates.length; index++) {
+        if (committedIndexes.has(index)) continue;
+        await persist(candidates[index] as ExtractedMemoryPayload, `${batch.id}:${source.index}:${index}`, source.record);
+        await markCandidateCommitted(batch.id, source.index, index);
+      }
+    }
+
+    const cursors = await advanceCursors([project]);
+    return {
+      batchId: batch.id,
+      completedSources: batch.sources.length,
+      cursor: cursors[project] ?? batch.startIndex,
+    };
   }
 
   /**

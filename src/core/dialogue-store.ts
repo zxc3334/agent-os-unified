@@ -1,32 +1,21 @@
-/**
- * 对话落盘：每轮对话追加写入 data/dialogues/<project>.jsonl
- *
- * 为什么需要它：记忆提取是定时批处理，它要读的原料必须落盘。
- * 内存里的 DialogueBuffer 只留最近 8 轮、进程重启即丢，不能作为提取依据。
- *
- * 设计要点：
- * - 按 project 分文件（与 data/memories/<project>/ 对齐）
- * - 只追加，不重写 → 崩溃安全
- * - 每条带 messageId 与时间戳 → 提取时可做去重与游标
- */
-import { appendFile, mkdir, readFile, writeFile } from 'node:fs/promises';
+/** 对话落盘与可恢复的逐 source 记忆提取批次。 */
+import { appendFile, mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
+import { randomUUID } from 'node:crypto';
 import { memoryRoot } from './memory.js';
 
 export interface DialogueRecord {
-  /** 该轮对话在飞书里的消息 id，用于去重 */
+  /** 飞书消息 id，用于追踪来源。 */
   messageId: string;
-  /** 哪个 bot 参与的 */
+  /** 哪个 bot 参与的。 */
   botId: string;
-  /** 归属项目，决定写入哪个文件 */
+  /** 归属项目。 */
   project: string;
-  /** 话题 id，用于把同一段讨论串起来 */
+  /** 话题 id。 */
   threadId: string;
-  /** 用户说了什么 */
   user: string;
-  /** bot 回答了什么 */
   bot: string;
-  /** ISO 时间戳 */
+  /** ISO 时间戳。 */
   at: string;
 }
 
@@ -35,7 +24,7 @@ export function dialogueFileForProject(project: string): string {
   return join(memoryRoot(), 'dialogues', `${slug || 'default'}.jsonl`);
 }
 
-/** 追加一条对话记录。失败不抛错，避免影响主链路。 */
+/** 追加失败不影响主对话链路。 */
 export async function appendDialogue(record: DialogueRecord): Promise<void> {
   const file = dialogueFileForProject(record.project);
   try {
@@ -46,87 +35,237 @@ export async function appendDialogue(record: DialogueRecord): Promise<void> {
   }
 }
 
-/** 读取某个项目的全部对话记录。 */
 export async function readDialogues(project: string): Promise<DialogueRecord[]> {
-  const file = dialogueFileForProject(project);
+  let content: string;
   try {
-    const content = await readFile(file, 'utf8');
-    return content
-      .split('\n')
-      .filter((line) => line.trim())
-      .map((line) => {
-        try {
-          return JSON.parse(line) as DialogueRecord;
-        } catch {
-          return undefined;
-        }
-      })
-      .filter((r): r is DialogueRecord => r !== undefined);
-  } catch {
-    return [];
+    content = await readFile(dialogueFileForProject(project), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+    throw error;
   }
+  return content.split('\n').flatMap((line, index) => {
+    if (!line.trim()) return [];
+    try {
+      return [JSON.parse(line) as DialogueRecord];
+    } catch (error) {
+      // Never drop a corrupt row: shifting later array indexes could permanently
+      // skip that source when the contiguous cursor advances.
+      throw new Error(`Invalid dialogue record at ${project}:${index + 1}`, { cause: error });
+    }
+  });
 }
 
-/**
- * 提取游标：记录每个项目已处理到第几条。
- * 提取任务读「游标之后」的新增记录，避免重复提取。
- */
 function cursorFile(): string {
   return join(memoryRoot(), 'dialogues', '.cursor.json');
 }
 
-export async function readCursor(): Promise<Record<string, number>> {
-  try {
-    return JSON.parse(await readFile(cursorFile(), 'utf8')) as Record<string, number>;
-  } catch {
-    return {};
-  }
+function extractionStateFile(): string {
+  return join(memoryRoot(), 'dialogues', '.extraction-state.json');
 }
 
-export async function writeCursor(cursors: Record<string, number>): Promise<void> {
+export async function readCursor(): Promise<Record<string, number>> {
+  let content: string;
+  try {
+    content = await readFile(cursorFile(), 'utf8');
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return {};
+    throw error;
+  }
+  const parsed = JSON.parse(content) as Record<string, unknown>;
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('Invalid dialogue cursor: expected an object');
+  }
+  for (const [project, value] of Object.entries(parsed)) {
+    if (!Number.isSafeInteger(value) || (value as number) < 0) {
+      throw new Error(`Invalid dialogue cursor for project ${project}`);
+    }
+  }
+  return parsed as Record<string, number>;
+}
+
+async function persistCursor(cursors: Record<string, number>): Promise<void> {
   const file = cursorFile();
   await mkdir(dirname(file), { recursive: true });
-  await writeFile(file, JSON.stringify(cursors, null, 2), 'utf8');
+  await atomicWrite(file, JSON.stringify(cursors, null, 2));
 }
 
-/** 取出某个项目「游标之后」的新增对话。 */
-export async function pendingDialogues(
-  project: string,
-): Promise<{ records: DialogueRecord[]; startIndex: number }> {
+export async function pendingDialogues(project: string): Promise<{ records: DialogueRecord[]; startIndex: number }> {
   const all = await readDialogues(project);
   const cursors = await readCursor();
-  const start = cursors[project] ?? 0;
-  return { records: all.slice(start), startIndex: start };
+  const startIndex = cursors[project] ?? 0;
+  return { records: all.slice(startIndex), startIndex };
 }
 
-/** 列出所有已有对话文件的项目。 */
 export async function listDialogueProjects(): Promise<string[]> {
-  const dir = join(memoryRoot(), 'dialogues');
   try {
     const { readdir } = await import('node:fs/promises');
-    const entries = await readdir(dir, { withFileTypes: true });
-    return entries
-      .filter((e) => e.isFile() && e.name.endsWith('.jsonl'))
-      .map((e) => e.name.replace(/\.jsonl$/, ''))
-      .sort();
+    return (await readdir(join(memoryRoot(), 'dialogues'), { withFileTypes: true }))
+      .filter((entry) => entry.isFile() && entry.name.endsWith('.jsonl'))
+      .map((entry) => entry.name.replace(/\.jsonl$/, '')).sort();
   } catch {
     return [];
   }
 }
 
+export interface ExtractionSource {
+  /** Stable source position in the append-only project log. */
+  index: number;
+  sourceId: string;
+  record: DialogueRecord;
+  /** Frozen output, written before side effects so retries do not re-extract differently. */
+  candidates?: unknown[];
+  committedCandidateIndexes: number[];
+  completed: boolean;
+}
+
+export interface ExtractionBatch {
+  id: string;
+  project: string;
+  startIndex: number;
+  endIndex: number;
+  sources: ExtractionSource[];
+}
+
+interface ExtractionState { batches: ExtractionBatch[] }
+
+let stateQueue: Promise<void> = Promise.resolve();
+function withStateLock<T>(operation: () => Promise<T>): Promise<T> {
+  const result = stateQueue.then(operation, operation);
+  stateQueue = result.then(() => undefined, () => undefined);
+  return result;
+}
+
+async function readExtractionState(): Promise<ExtractionState> {
+  try {
+    const state = JSON.parse(await readFile(extractionStateFile(), 'utf8')) as ExtractionState;
+    if (!state || !Array.isArray(state.batches)) throw new Error('Invalid extraction state: batches must be an array');
+    return state;
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { batches: [] };
+    throw error;
+  }
+}
+
+async function writeExtractionState(state: ExtractionState): Promise<void> {
+  const file = extractionStateFile();
+  await mkdir(dirname(file), { recursive: true });
+  await atomicWrite(file, JSON.stringify(state, null, 2));
+}
+
+async function atomicWrite(file: string, content: string): Promise<void> {
+  const temp = `${file}.${process.pid}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temp, content, 'utf8');
+    await rename(temp, file);
+  } catch (error) {
+    const { unlink } = await import('node:fs/promises');
+    await unlink(temp).catch(() => undefined);
+    throw error;
+  }
+}
+
+function cloneBatch(batch: ExtractionBatch): ExtractionBatch {
+  return structuredClone(batch);
+}
+
 /**
- * 把指定项目的游标推进到「当前全部条数」。
- *
- * 只在定时提取任务**成功后**调用：
- * - 失败时推进会跳过未处理的对话
- * - 「读了但没值得记的」属于正常完成，也要推进，否则会无限重复读同一批
+ * Freeze the current pending high-water mark. An unfinished batch is returned as-is
+ * after restart; messages appended later are necessarily outside its endIndex.
+ */
+export async function beginExtractionBatch(project: string): Promise<ExtractionBatch | undefined> {
+  await advanceCursors([project]);
+  return withStateLock(async () => {
+    const state = await readExtractionState();
+    const unfinished = state.batches.find((batch) => batch.project === project && batch.sources.some((source) => !source.completed));
+    if (unfinished) return cloneBatch(unfinished);
+
+    const all = await readDialogues(project);
+    const cursors = await readCursor();
+    const startIndex = cursors[project] ?? 0;
+    if (startIndex >= all.length) return undefined;
+    const endIndex = all.length;
+    const sources: ExtractionSource[] = all.slice(startIndex, endIndex).map((record, offset) => ({
+      index: startIndex + offset,
+      sourceId: record.messageId || `${project}:${startIndex + offset}`,
+      record,
+      committedCandidateIndexes: [],
+      completed: false,
+    }));
+    const batch: ExtractionBatch = {
+      id: `${encodeURIComponent(project)}:${startIndex}:${endIndex}`,
+      project,
+      startIndex,
+      endIndex,
+      sources,
+    };
+    state.batches.push(batch);
+    await writeExtractionState(state);
+    return cloneBatch(batch);
+  });
+}
+
+export async function freezeSourceCandidates(
+  batchId: string,
+  sourceIndex: number,
+  candidates: unknown[],
+): Promise<unknown[]> {
+  return withStateLock(async () => {
+    const state = await readExtractionState();
+    const source = findSource(state, batchId, sourceIndex);
+    if (source.candidates === undefined) {
+      source.candidates = structuredClone(candidates);
+      if (source.candidates.length === 0) source.completed = true;
+      await writeExtractionState(state);
+    }
+    return structuredClone(source.candidates);
+  });
+}
+
+export async function markCandidateCommitted(batchId: string, sourceIndex: number, candidateIndex: number): Promise<void> {
+  return withStateLock(async () => {
+    const state = await readExtractionState();
+    const source = findSource(state, batchId, sourceIndex);
+    if (!source.candidates || candidateIndex < 0 || candidateIndex >= source.candidates.length) {
+      throw new Error(`Unknown candidate ${candidateIndex} for source ${sourceIndex}`);
+    }
+    if (!source.committedCandidateIndexes.includes(candidateIndex)) {
+      source.committedCandidateIndexes.push(candidateIndex);
+      source.committedCandidateIndexes.sort((a, b) => a - b);
+    }
+    source.completed = source.committedCandidateIndexes.length === source.candidates.length;
+    await writeExtractionState(state);
+  });
+}
+
+function findSource(state: ExtractionState, batchId: string, sourceIndex: number): ExtractionSource {
+  const batch = state.batches.find((item) => item.id === batchId);
+  const source = batch?.sources.find((item) => item.index === sourceIndex);
+  if (!source) throw new Error(`Unknown extraction source ${batchId}/${sourceIndex}`);
+  return source;
+}
+
+/**
+ * Advance only to the first gap in individually completed extraction sources.
+ * The legacy scheduled-task call is harmless unless an extraction batch actually
+ * completed those source positions; reminders and other plans cannot skip work.
  */
 export async function advanceCursors(projects: string[]): Promise<Record<string, number>> {
-  const cursors = await readCursor();
-  for (const project of projects) {
-    const all = await readDialogues(project);
-    cursors[project] = all.length;
-  }
-  await writeCursor(cursors);
-  return cursors;
+  return withStateLock(async () => {
+    const cursors = await readCursor();
+    const state = await readExtractionState();
+    let changed = false;
+    for (const project of projects) {
+      let cursor = cursors[project] ?? 0;
+      const completed = new Set(state.batches
+        .filter((batch) => batch.project === project)
+        .flatMap((batch) => batch.sources.filter((source) => source.completed).map((source) => source.index)));
+      while (completed.has(cursor)) cursor++;
+      if (cursor !== (cursors[project] ?? 0)) {
+        cursors[project] = cursor;
+        changed = true;
+      }
+    }
+    if (changed) await persistCursor(cursors);
+    return cursors;
+  });
 }
