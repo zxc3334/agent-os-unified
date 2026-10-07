@@ -1,7 +1,7 @@
 # 事项轨迹与个人回放评测
 
-- Status: in-progress (user-facing persistence blocked by 04-unified-task-runtime)
-- Blocked by: 04-unified-task-runtime
+- Status: in-progress
+- Blocked by: 04-unified-task-runtime (collaboration/continuation end-to-end coverage remains)
 - Milestone: B-E
 - Spec: [spec.md](../spec.md)
 
@@ -15,11 +15,10 @@
 - 为本票契约补单元/集成测试；通过公开行为验证，不以内部函数调用次数为验收。
 - 完成后更新实现与验证说明；不触碰无关用户数据、生产配置或既有工作区。
 
-
 ## Implementation status
 
 - Added content-free lifecycle trace events with opaque task/source/artifact IDs and failure codes. Trace history is persisted in the task record and survives restart via existing `get` / `list`; best-effort trace writes never change task outcomes, and legacy records load with empty history.
-- Added 25 versioned synthetic replay cases and basic version/result contract tests.
-- Added owner-DM-only `/task recent` and `/task trace <id>` commands. They filter by trusted owner identity and expose only task state, content-free trace stages, source/artifact IDs, and failure codes—not prompt, result, or progress text. Tests verify owner gating and absence of private markers.
-- Remaining: stronger independent assertions for replay behavior (avoid fixtures that manufacture expected outputs), privacy/revocation lifecycle integration, and richer user-facing matter selection. This ticket is not complete.
-- Verification after trace persistence: `pnpm test` (89/89 integrated), `pnpm build`, `git diff --check`.
+- Added 25 versioned synthetic replay cases and owner-DM-only `/task recent` and `/task trace <id>` commands. These expose task state, content-free trace stages and opaque source/artifact identifiers, not prompts, results, or progress text.
+- Replay tests now use independent fixed authorization-space and memory-confirmation oracles rather than deriving expected results from fixture fields. They cover group/non-owner denial, no permission expansion from user requests, rejection/forget/failure/implicit-request boundaries, and owner/scheduler scope filtering.
+- Still incomplete: memory forgetting and material revocation do not yet have end-to-end tests proving cleanup/invalidation of associated traces and derived references; collaboration/continuation end-to-end coverage remains in ticket 04. Ticket remains in progress.
+- Verification after replay assertion update: focused replay tests (10/10), `pnpm test` (70/70 in the agent worktree), `pnpm build`, and `git diff --check`. Main integration branch subsequently adds the owner blog-command and collaboration coverage; rerun the complete suite after integration.
