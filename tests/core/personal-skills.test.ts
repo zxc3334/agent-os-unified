@@ -15,6 +15,10 @@ test('personal skill packs require explicit enablement and only add scoped guida
     const guidance = await registry.promptFor('请根据简历做模拟面试');
     assert.match(guidance, /求职与项目面试/);
     assert.match(guidance, /不增加工具、权限或记忆空间访问范围/);
+    assert.match(guidance, /一次一问/);
+    assert.match(guidance, /缺乏证据时追问/);
+    assert.match(guidance, /薄弱点和建议复习问题/);
+    assert.match(guidance, /只有真实学习考点才调用既有 save_memory/);
     assert.doesNotMatch(guidance, /阅读与读书记录/);
 
     const reopened = new JsonPersonalSkillRegistry(file);

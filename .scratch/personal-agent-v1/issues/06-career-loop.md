@@ -32,3 +32,10 @@
 - Follow-up: added owner-DM-only `/career material add <space> <title> :: <text>`, `material search <query>`, and `material revoke <id>`. Storage remains separate from personal claims, retrieval requires current matter space authorization and returns line/version citations, and revoked content is removed from future search/read paths. Career-related prompts receive at most three matching authorized excerpts, explicitly marked as reference data rather than confirmed experience.
 - Verification after material integration: `pnpm test` (90/90), `pnpm build`, `git diff --check`.
 - Remaining: natural-language mock interview execution, project-record lookup beyond explicitly added text materials, automatic private review delivery, and conversational workflow replacing slash-command setup.
+
+
+### Natural-language interview entry
+
+- The owner’s ordinary message path already selects the explicitly enabled `career-interview` skill from natural-language triggers and appends the current approved resume, confirmed/unconfirmed evidence, target roles, and bounded authorized material excerpts for relevant interview requests. The skill directs a one-question-at-a-time interview, distinguishes evidence from inference, and concludes with strengths and review questions. Added assertions to the public skill-registry test for these behavioral instructions. This is prompt-context integration; the system does not yet automatically persist model-generated interview feedback into career learning records, so explicit `/career feedback` remains the trusted persistence path.
+- Verification after these assertions: `pnpm test` (101/101), `pnpm build`, `git diff --check`.
+- Remaining: project-record lookup beyond manually added text materials and automatic private delivery of due review items. Ticket remains in progress.
