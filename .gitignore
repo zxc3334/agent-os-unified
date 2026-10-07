@@ -1,0 +1,9 @@
+node_modules/
+dist/
+.env
+config/bots.json
+data/
+*.log
+
+# Windows 下载标记文件（无意义）
+*Zone.Identifier*
