@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -113,5 +113,43 @@ test('invalid domain input is rejected before persistence and does not poison la
     await assert.rejects(career.addEvidence({ claim: '', status: 'confirmed', sources: [confirmedSource] }));
     const valid = await career.addEvidence({ claim: 'Confirmed contribution.', status: 'confirmed', sources: [confirmedSource] });
     assert.equal((await career.listEvidence())[0]?.id, valid.id);
+  });
+});
+
+
+test('legacy learning records backfill schedule state without dropping prior review progress', async () => {
+  await withStore(async (filePath) => {
+    const career = new JsonCareerPreparation(filePath);
+    const role = await career.saveRoleRequirements({ title: 'Backend Intern', requirements: [] });
+    const resume = await career.proposeResumeVersion({ roleId: role.id, evidenceIds: [] });
+    const { learningRecords } = await career.recordMockInterview({
+      resumeVersionId: resume.id,
+      feedback: [{ summary: 'Needs detail.', weakPoint: 'Explain retries.', source: unconfirmedSource }],
+      recordedAt: '2026-10-01T00:00:00.000Z',
+    });
+    const learning = learningRecords[0]!;
+    await career.recordLearningReview(learning.id, { score: 3, reviewedAt: '2026-10-02T00:00:00.000Z' });
+    await career.recordLearningReview(learning.id, { score: 4, reviewedAt: '2026-10-05T00:00:00.000Z' });
+
+    const legacy = JSON.parse(await readFile(filePath, 'utf8')) as { learningRecords: Array<Record<string, unknown>> };
+    const persisted = legacy.learningRecords[0]!;
+    delete persisted.nextReviewAt;
+    delete persisted.repetition;
+    delete persisted.intervalDays;
+    delete persisted.mastery;
+    delete persisted.reviewState;
+    await writeFile(filePath, `${JSON.stringify(legacy)}\n`, 'utf8');
+
+    const reopened = new JsonCareerPreparation(filePath);
+    const restored = (await reopened.listLearningRecords())[0]!;
+    assert.equal(restored.reviewRounds, 2);
+    assert.deepEqual(restored.reviewHistory, [
+      { score: 3, reviewedAt: '2026-10-02T00:00:00.000Z' },
+      { score: 4, reviewedAt: '2026-10-05T00:00:00.000Z' },
+    ]);
+    assert.equal(restored.latestScore, 4);
+    assert.equal(restored.repetition, 2);
+    assert.equal(restored.intervalDays, 7);
+    assert.equal(restored.nextReviewAt, '2026-10-12T00:00:00.000Z');
   });
 });

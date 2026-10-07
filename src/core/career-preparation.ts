@@ -2,6 +2,7 @@ import { randomUUID } from 'node:crypto';
 import { mkdir, open, readFile, rename, unlink } from 'node:fs/promises';
 import { dirname } from 'node:path';
 import { z } from 'zod';
+import { calculateNextReview } from './memory.js';
 
 export interface CareerSourceRef {
   kind: 'project-record' | 'material' | 'resume' | 'mock-interview' | 'user-confirmation' | 'other';
@@ -60,6 +61,12 @@ export interface CareerLearningRecord {
   latestScore?: number;
   reviewRounds: number;
   reviewHistory: LearningReview[];
+  /** Scheduler state; optional only in persisted legacy JSON and normalized on read. */
+  nextReviewAt: string;
+  repetition: number;
+  intervalDays: number;
+  mastery: number;
+  reviewState: 'active' | 'mastered';
 }
 
 export interface MockInterviewRecord {
@@ -113,6 +120,9 @@ const StateSchema = z.object({
     summary: z.string().min(1), weakPoint: z.string().min(1), source: SourceSchema,
     resumeVersionId: z.string().min(1), createdAt: z.string().min(1), latestScore: z.number().int().min(0).max(5).optional(),
     reviewRounds: z.number().int().nonnegative(), reviewHistory: z.array(z.object({ score: z.number().int().min(0).max(5), reviewedAt: z.string().min(1) }).strict()),
+    nextReviewAt: z.string().min(1).optional(), repetition: z.number().int().nonnegative().optional(),
+    intervalDays: z.number().int().nonnegative().optional(), mastery: z.number().int().min(0).max(5).optional(),
+    reviewState: z.enum(['active', 'mastered']).optional(),
   }).strict()),
 }).strict();
 
@@ -240,6 +250,7 @@ export class JsonCareerPreparation {
         id: randomUUID(), assessmentType: 'practice-feedback', reviewStatus: 'needs-review',
         summary: feedback.summary, weakPoint: feedback.weakPoint, source: copy(feedback.source),
         resumeVersionId: resume.id, createdAt: recordedAt, reviewRounds: 0, reviewHistory: [],
+        nextReviewAt: addDays(recordedAt, 1), repetition: 0, intervalDays: 1, mastery: 1, reviewState: 'active',
       }));
       const interview: MockInterviewRecord = {
         id: interviewId, resumeVersionId: resume.id, roleId, recordedAt,
@@ -271,6 +282,12 @@ export class JsonCareerPreparation {
       record.reviewRounds += 1;
       record.reviewStatus = 'reviewed';
       record.reviewHistory.push(entry);
+      const next = calculateNextReview(record, entry.score, new Date(entry.reviewedAt));
+      record.repetition = next.repetition;
+      record.mastery = next.mastery;
+      record.intervalDays = next.intervalDays;
+      record.nextReviewAt = next.nextReviewAt;
+      record.reviewState = next.status;
       return record;
     });
   }
@@ -291,7 +308,10 @@ export class JsonCareerPreparation {
     }
     const parsed = StateSchema.safeParse(json);
     if (!parsed.success) throw new Error(`Career preparation store is invalid; refusing to overwrite: ${this.filePath}: ${parsed.error.message}`);
-    return parsed.data;
+    return {
+      ...parsed.data,
+      learningRecords: parsed.data.learningRecords.map(normalizeLearningRecord),
+    };
   }
 
   private mutate<T>(operation: (state: CareerState) => T): Promise<T> {
@@ -319,6 +339,46 @@ export class JsonCareerPreparation {
     this.queue = pending.catch(() => undefined);
     return pending;
   }
+}
+
+function addDays(timestamp: string, days: number): string {
+  return new Date(new Date(timestamp).getTime() + days * 24 * 60 * 60 * 1000).toISOString();
+}
+
+/**
+ * Backfill scheduler state for records written before career reviews used the shared
+ * repetition algorithm. Existing score/history progress is replayed rather than reset.
+ */
+function normalizeLearningRecord(record: z.infer<typeof StateSchema>['learningRecords'][number]): CareerLearningRecord {
+  const history = [...record.reviewHistory];
+  const roundsToRestore = Math.max(record.reviewRounds, history.length);
+  const fallbackScore = record.latestScore ?? history.at(-1)?.score;
+  const roundsWithoutScoreHistory = history.length === 0 && record.reviewRounds > 0 && fallbackScore === undefined;
+  const fallbackTime = history.at(-1)?.reviewedAt ?? record.createdAt;
+  while (history.length < roundsToRestore && fallbackScore !== undefined) {
+    history.push({ score: fallbackScore, reviewedAt: fallbackTime });
+  }
+
+  let schedule: ReturnType<typeof calculateNextReview> = {
+    repetition: 0,
+    mastery: 1,
+    intervalDays: 1,
+    nextReviewAt: addDays(record.createdAt, 1),
+    status: 'active',
+  };
+  for (const review of history) {
+    schedule = calculateNextReview(schedule, review.score, new Date(review.reviewedAt));
+  }
+
+  return {
+    ...record,
+    reviewHistory: record.reviewHistory,
+    repetition: record.repetition ?? (roundsWithoutScoreHistory ? record.reviewRounds : schedule.repetition),
+    mastery: record.mastery ?? schedule.mastery,
+    intervalDays: record.intervalDays ?? schedule.intervalDays,
+    nextReviewAt: record.nextReviewAt ?? schedule.nextReviewAt,
+    reviewState: record.reviewState ?? schedule.status,
+  };
 }
 
 function requireText(value: string, field: string, maxLength: number): void {

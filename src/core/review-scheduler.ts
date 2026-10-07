@@ -19,6 +19,7 @@ async function listAllProjectEntries(): Promise<MemoryCardEntry[]> {
 }
 import { buildReviewCard } from '../im/card.js';
 import type { Bot } from '../im/lark.js';
+import type { CareerLearningRecord } from './career-preparation.js';
 
 export interface ReviewSchedulerOptions {
   cronExpression?: string;
@@ -29,6 +30,7 @@ export interface ReviewSchedulerOptions {
   getTargetChatId: () => string | undefined;
   now?: () => Date;
   baseDir?: string;
+  careerReviewAdapter?: CareerReviewSchedulerAdapter;
 }
 
 export interface ReviewTriggerResult {
@@ -37,6 +39,34 @@ export interface ReviewTriggerResult {
   chatId?: string;
   messageId?: string;
   reason?: string;
+}
+
+export interface CareerReviewStore {
+  listLearningRecords(): Promise<CareerLearningRecord[]>;
+  recordLearningReview(id: string, review: { score: number; reviewedAt?: string }): Promise<CareerLearningRecord>;
+}
+
+/**
+ * Small bridge between persisted interview-learning feedback and the review lifecycle.
+ * This adapter returns due records to an explicitly private caller; it is not consulted
+ * by triggerDueReviews/triggerProjectReview, which remain memory-card-only group flows.
+ */
+export class CareerReviewSchedulerAdapter {
+  constructor(
+    private readonly career: CareerReviewStore,
+    private readonly now: () => Date = () => new Date(),
+  ) {}
+
+  async listDueReviews(): Promise<CareerLearningRecord[]> {
+    const now = this.now().getTime();
+    return (await this.career.listLearningRecords())
+      .filter((record) => record.reviewState === 'active' && new Date(record.nextReviewAt).getTime() <= now)
+      .sort((left, right) => left.nextReviewAt.localeCompare(right.nextReviewAt));
+  }
+
+  async completeReview(id: string, quality: number): Promise<CareerLearningRecord> {
+    return this.career.recordLearningReview(id, { score: quality, reviewedAt: this.now().toISOString() });
+  }
 }
 
 export class ReviewScheduler {
@@ -50,6 +80,7 @@ export class ReviewScheduler {
   private readonly getTargetChatId: () => string | undefined;
   private readonly now: () => Date;
   private readonly baseDir?: string;
+  private readonly careerReviewAdapter?: CareerReviewSchedulerAdapter;
   private lastDailyPushDate?: string;
 
   constructor(options: ReviewSchedulerOptions) {
@@ -61,6 +92,7 @@ export class ReviewScheduler {
     this.getTargetChatId = options.getTargetChatId;
     this.now = options.now || (() => new Date());
     this.baseDir = options.baseDir;
+    this.careerReviewAdapter = options.careerReviewAdapter;
   }
 
   start(): void {
@@ -219,6 +251,16 @@ export class ReviewScheduler {
         reason: msg,
       };
     }
+  }
+
+  /**
+   * Career feedback uses the same review completion entry point/algorithm, but is
+   * deliberately never included in group-chat selection or scheduled group pushes.
+   * The owner-only caller may retrieve due records from the adapter and present them
+   * in a private conversation before invoking this method.
+   */
+  async completeCareerReview(id: string, quality: number): Promise<CareerLearningRecord | undefined> {
+    return this.careerReviewAdapter?.completeReview(id, quality);
   }
 
   /**
