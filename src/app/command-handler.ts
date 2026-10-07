@@ -25,6 +25,7 @@ import type { JsonCareerPreparation } from "../core/career-preparation.js";
 import type { CareerReviewSchedulerAdapter } from "../core/review-scheduler.js";
 import type { JsonTextMaterialLibrary } from "../core/text-materials.js";
 import type { BlogEntryService } from "./blog-entry-service.js";
+import type { JsonBlogAssociations } from "../core/blog-associations.js";
 import type { JsonDailyRecordsReminders } from "../core/daily-records.js";
 import { resolveRelativeDue } from "../core/daily-records.js";
 import type { PersonalReminderScheduler } from "./personal-reminder-scheduler.js";
@@ -51,6 +52,7 @@ export async function handleSessionCommand(options: {
   careerReviewScheduler?: CareerReviewSchedulerAdapter;
   textMaterials?: JsonTextMaterialLibrary;
   blogEntryService?: BlogEntryService;
+  blogAssociations?: JsonBlogAssociations;
   dailyRecords?: JsonDailyRecordsReminders;
   personalReminderScheduler?: PersonalReminderScheduler;
 }): Promise<CommandOutcome> {
@@ -74,6 +76,7 @@ export async function handleSessionCommand(options: {
     careerReviewScheduler,
     textMaterials,
     blogEntryService,
+    blogAssociations,
     dailyRecords,
     personalReminderScheduler,
   } = options;
@@ -323,8 +326,14 @@ export async function handleSessionCommand(options: {
         const authorizedSpaceIds = session.memorySpaceIds === undefined
           ? spaces.map((space) => space.id)
           : spaces.map((space) => space.id).filter((id) => session.memorySpaceIds?.includes(id));
+        const reference = textMaterials.getReference(command.materialId);
         const revoked = await textMaterials.revoke(command.materialId, msg.receivedAt, authorizedSpaceIds);
-        await bot.reply(msg.messageId, revoked ? "参考资料已撤权，后续检索不再返回原文。" : "没有找到授权范围内的有效参考资料。", hasThread);
+        if (revoked && reference && blogAssociations) {
+          blogAssociations.invalidateSource(
+            { kind: "material", id: reference.id, spaceId: reference.spaceId }, "revoked", msg.receivedAt,
+          );
+        }
+        await bot.reply(msg.messageId, revoked ? "参考资料已撤权，后续检索不再返回原文，已关联的博客引用也已失效。" : "没有找到授权范围内的有效参考资料。", hasThread);
       } else if (command.action === "due") {
         if (!careerReviewScheduler) throw new Error("复习调度暂不可用");
         const due = (await careerReviewScheduler.listDueReviews()).slice(0, 5);
@@ -477,10 +486,25 @@ export async function handleSessionCommand(options: {
         resultMessage = "记忆已更正。";
       } else if (command.action === "reject") {
         const rejected = await personalMemoryStore.reject(entry.id, entry.version);
-        resultMessage = rejected ? "已拒绝该候选；来源记录未删除。" : "该记忆已不再有效。";
+        if ((rejected || entry.status === "rejected") && blogAssociations) {
+          blogAssociations.invalidateSource(
+            { kind: "memory", id: entry.id, spaceId: entry.spaceId }, "revoked", msg.receivedAt,
+          );
+        }
+        resultMessage = rejected
+          ? "已拒绝该候选；来源记录未删除，关联博客引用已失效。"
+          : entry.status === "rejected" ? "该候选已拒绝，关联博客引用已确保失效。" : "该记忆已不再有效。";
       } else {
         const forgotten = await personalMemoryStore.forget(entry.id, entry.version);
-        resultMessage = forgotten ? "已忘记该记忆，内容已清除并抑制同一来源重新提取。" : "该记忆已经忘记。";
+        if ((forgotten || entry.status === "forgotten") && blogAssociations) {
+          // Repeating /memory forget after a partial cross-store failure safely retries the tombstone.
+          blogAssociations.invalidateSource(
+            { kind: "memory", id: entry.id, spaceId: entry.spaceId }, "revoked", msg.receivedAt,
+          );
+        }
+        resultMessage = forgotten
+          ? "已忘记该记忆，内容已清除、抑制同一来源重新提取，关联博客引用已失效。"
+          : entry.status === "forgotten" ? "该记忆已经忘记，关联博客引用已确保失效。" : "该记忆已经忘记。";
       }
       const updated = await personalMemoryStore.get(entry.id, { authorizedSpaceIds });
       if (updated) {

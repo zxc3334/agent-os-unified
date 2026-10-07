@@ -7,6 +7,7 @@ import { handleSessionCommand } from '../../src/app/command-handler.js';
 import { JsonCareerPreparation } from '../../src/core/career-preparation.js';
 import { PersonalMemoryStore } from '../../src/core/personal-memory.js';
 import { JsonTextMaterialLibrary } from '../../src/core/text-materials.js';
+import { JsonBlogAssociations } from '../../src/core/blog-associations.js';
 import { parseCommand } from '../../src/core/command-parser.js';
 import { CareerReviewSchedulerAdapter } from '../../src/core/review-scheduler.js';
 
@@ -155,8 +156,18 @@ test('career material commands enforce matter scope and preserve line citations 
     });
     assert.ok(await textMaterials.readExcerpt(materialId!, { start: 1, end: 1 }, [careerSpace.id]));
     assert.match(ctx.replies.at(-1)!, /没有找到授权范围/);
-    await handleSessionCommand({ ...ctx.options, personalMemoryStore, textMaterials, command: parseCommand(`/career material revoke ${materialId}`) });
-    assert.match(ctx.replies.at(-1)!, /已撤权/);
+    const blogAssociations = new JsonBlogAssociations(join(ctx.directory, 'blog.json'));
+    const proposal = blogAssociations.proposeAssociation({
+      initiatedBy: 'user', operationId: 'material-source-proposal', actorId: 'owner',
+      createdAt: '2026-10-07T12:00:00.000Z', authorizedSpaceIds: [careerSpace.id, otherSpace.id],
+      sources: [
+        { kind: 'material', id: materialId!, spaceId: careerSpace.id },
+        { kind: 'daily-record', id: 'another-source', spaceId: otherSpace.id },
+      ], reasoning: 'Potential relation.', intendedUse: 'Private blog draft.',
+    });
+    await handleSessionCommand({ ...ctx.options, personalMemoryStore, textMaterials, blogAssociations, command: parseCommand(`/career material revoke ${materialId}`) });
+    assert.match(ctx.replies.at(-1)!, /博客引用也已失效/);
+    assert.equal(blogAssociations.areProposalSourcesActive(proposal.id), false);
     assert.equal(await textMaterials.readExcerpt(materialId!, { start: 1, end: 1 }, [careerSpace.id]), undefined);
     assert.deepEqual(textMaterials.search('stale reads', [careerSpace.id]), []);
   } finally {

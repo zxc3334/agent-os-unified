@@ -24,3 +24,9 @@
 - Tests cover authorization, source immutability, stance preservation, public-use gates, bounded retrieval, owner/group restrictions, decisions, revocation/deletion, and legacy-state migration.
 - Verification: the source-lifecycle slice passed its focused core tests (77/77) in the implementation worktree; after integration, main-branch `pnpm test` passes 107/107 with `pnpm build` and `git diff --check`.
 - Remaining: authoritative memory/material/daily-record revocation and deletion events are not yet propagated automatically into blog tombstones; model-generated proposal, outline and draft workflow remains. Ticket remains in progress.
+
+
+- Follow-up: owner-private `/memory reject|forget` and `/career material revoke` now tombstone the exact `(kind, spaceId, id)` reference in the blog-association store after the authoritative source mutation succeeds. Historical proposals/drafts remain auditable but are no longer reusable.
+- Tests verify that rejected/forgotten memories and revoked materials make existing proposal sources inactive; unauthorized material revocation does not tombstone the source.
+- Verification: `pnpm test` (115/115), `pnpm build`, `git diff --check`.
+- Remaining: daily-record deletion/reclassification event propagation, a durable cross-store outbox (the owner can retry a failed tombstone by repeating the forget/revoke command), and model-generated proposals/drafts remain. Ticket remains in progress.

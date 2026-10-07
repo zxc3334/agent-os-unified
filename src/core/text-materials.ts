@@ -155,6 +155,11 @@ export class JsonTextMaterialLibrary {
     };
   }
 
+  getReference(materialId: string): { id: string; spaceId: string; status: TextMaterial['status'] } | undefined {
+    const material = this.state.materials.find((item) => item.id === materialId && item.ownerId === this.ownerId);
+    return material ? { id: material.id, spaceId: material.spaceId, status: material.status } : undefined;
+  }
+
   revoke(materialId: string, changedAt: string, authorizedSpaceIds: readonly string[]): Promise<boolean> {
     const updatedAt = validIso(changedAt, 'changedAt');
     return this.mutate((state) => {

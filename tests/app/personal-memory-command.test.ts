@@ -6,6 +6,7 @@ import { test } from 'node:test';
 import { handleSessionCommand } from '../../src/app/command-handler.js';
 import { parseCommand } from '../../src/core/command-parser.js';
 import { PersonalMemoryStore } from '../../src/core/personal-memory.js';
+import { JsonBlogAssociations } from '../../src/core/blog-associations.js';
 
 const source = {
   sourceId: 'msg-1', actorId: 'owner-open-id', receivedAt: '2026-10-07T12:00:00+08:00',
@@ -138,6 +139,52 @@ test('owner can inspect spaces and scope the current matter; group chats are den
     });
     assert.match(ctx.replies.at(-1)!, /仅限所有者在私聊中使用/);
     assert.doesNotMatch(ctx.replies.at(-1)!, new RegExp(ctx.space.id));
+  } finally {
+    await rm(ctx.directory, { recursive: true, force: true });
+  }
+});
+
+
+test('forgetting or rejecting a memory invalidates its reusable blog source reference', async () => {
+  const ctx = await setup();
+  try {
+    const blogAssociations = new JsonBlogAssociations(join(ctx.directory, 'blog.json'));
+    const forgottenProposal = blogAssociations.proposeAssociation({
+      initiatedBy: 'user', operationId: 'forgotten-memory-proposal', actorId: 'owner-open-id',
+      createdAt: '2026-10-07T12:00:00.000Z', authorizedSpaceIds: [ctx.space.id, 'other'],
+      sources: [
+        { kind: 'memory', id: ctx.entry.id, spaceId: ctx.space.id },
+        { kind: 'daily-record', id: 'another-source', spaceId: 'other' },
+      ], reasoning: 'Potential relation.', intendedUse: 'Private blog draft.',
+    });
+    const rejected = await ctx.store.add({
+      spaceId: ctx.space.id, kind: 'fact', content: 'Rejected memory', confidence: 'contested',
+      source: { ...source, sourceId: 'rejected-source' },
+    });
+    const rejectedProposal = blogAssociations.proposeAssociation({
+      initiatedBy: 'user', operationId: 'rejected-memory-proposal', actorId: 'owner-open-id',
+      createdAt: '2026-10-07T12:00:00.000Z', authorizedSpaceIds: [ctx.space.id, 'other'],
+      sources: [
+        { kind: 'memory', id: rejected.entry!.id, spaceId: ctx.space.id },
+        { kind: 'daily-record', id: 'another-source-2', spaceId: 'other' },
+      ], reasoning: 'Potential relation.', intendedUse: 'Private blog draft.',
+    });
+    let failFirstInvalidation = true;
+    const retryableAssociations = {
+      invalidateSource: (...args: Parameters<JsonBlogAssociations['invalidateSource']>) => {
+        if (failFirstInvalidation) {
+          failFirstInvalidation = false;
+          throw new Error('temporary tombstone write failure');
+        }
+        return blogAssociations.invalidateSource(...args);
+      },
+    } as never;
+    await handleSessionCommand({ ...ctx.options, blogAssociations: retryableAssociations, command: parseCommand(`/memory forget ${ctx.entry.id}`) });
+    assert.match(ctx.replies.at(-1)!, /记忆操作失败/);
+    await handleSessionCommand({ ...ctx.options, blogAssociations: retryableAssociations, command: parseCommand(`/memory forget ${ctx.entry.id}`) });
+    await handleSessionCommand({ ...ctx.options, blogAssociations, command: parseCommand(`/memory reject ${rejected.entry!.id}`) });
+    assert.equal(blogAssociations.areProposalSourcesActive(forgottenProposal.id), false);
+    assert.equal(blogAssociations.areProposalSourcesActive(rejectedProposal.id), false);
   } finally {
     await rm(ctx.directory, { recursive: true, force: true });
   }

@@ -473,6 +473,7 @@ async function startConfiguredBot(
         careerReviewScheduler,
         textMaterials,
         blogEntryService,
+        blogAssociations,
         dailyRecords,
         personalReminderScheduler,
       });
