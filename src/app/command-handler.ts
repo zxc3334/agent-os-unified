@@ -130,6 +130,8 @@ export async function handleSessionCommand(options: {
           const record = dailyRecords.createRecord({
             operationId: `message:${msg.messageId}`, kind: command.kind,
             date: localDateAt(msg.receivedAt, timezone), content: command.content,
+            ...(command.authorView ? { authorView: command.authorView } : {}),
+            ...(command.userView ? { userView: command.userView } : {}),
             source, scopeId: session.memorySpaceIds?.[0] ?? null,
           });
           await bot.reply(msg.messageId, `已保存${command.kind === "daily" ? "日常" : command.kind === "reading" ? "阅读" : "探索"}记录 [${record.id}]（${record.date}）。这只是带日期的记录，不会自动变成长久偏好或提醒。`, hasThread);

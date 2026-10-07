@@ -19,7 +19,7 @@
 ## Implementation status
 
 - Added the durable `JsonDailyRecordsReminders` core for dated daily, reading, and exploration records; source/receipt timestamps and timezones; scope changes; bounded recaps; and a separate reminder lifecycle with idempotency, edits, cancellation, delivery receipts, failure, missed recovery, and trusted-time relative date resolution.
-- Owner-only `/daily` and `/reminder` commands now save/review/re-scope records, create/edit/list/cancel reminders, and use the trusted message receipt time and local timezone. A date record never implicitly creates a reminder.
+- Owner-only `/daily` and `/reminder` commands now save/review/re-scope records, create/edit/list/cancel reminders, and use the trusted message receipt time and local timezone. Reading capture also accepts `/daily add reading <作者观点> :: <我的观点>` and persists the two positions separately. A date record never implicitly creates a reminder.
 - `PersonalReminderScheduler` restores future reminders, delivers to the originating private chat with an idempotency key, reports delivered only after a transport message ID is returned, persists failures, and marks overdue reminders missed after restart with an honest recovery notice.
 - Tests cover persistence, parser boundaries, private-chat authorization, timezones, explicit delivery receipts, missed recovery, and separation of records from reminders.
 - Verification: `pnpm test` (65/65), `pnpm build`, `git diff --check`. A scheduler test uses a due time safely beyond startup to avoid classifying a test-runner scheduling delay as a missed reminder.

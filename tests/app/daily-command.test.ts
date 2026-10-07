@@ -26,6 +26,7 @@ async function setup() {
 
 test('daily and reminder command parsing is bounded and rejects malformed commands', () => {
   assert.deepEqual(parseCommand('/daily add reading Read one chapter'), { name: 'daily', action: 'add', kind: 'reading', content: 'Read one chapter' });
+  assert.deepEqual(parseCommand('/daily add reading Author argues attention is limited :: I think deliberate practice matters more'), { name: 'daily', action: 'add', kind: 'reading', content: '用户观点：I think deliberate practice matters more', authorView: 'Author argues attention is limited', userView: 'I think deliberate practice matters more' });
   assert.deepEqual(parseCommand('/daily scope record-1 reading'), { name: 'daily', action: 'scope', recordId: 'record-1', scopeId: 'reading' });
   assert.deepEqual(parseCommand('/reminder add 后天上午9点 :: Call mom'), { name: 'reminder', action: 'add', due: '后天上午9点', content: 'Call mom' });
   assert.deepEqual(parseCommand('/reminder edit reminder-1 明天 10:30 :: Call mom'), { name: 'reminder', action: 'edit', reminderId: 'reminder-1', due: '明天 10:30', content: 'Call mom' });
@@ -39,6 +40,10 @@ test('private daily records and reminders persist with trusted source dates and 
     const record = ctx.dailyRecords.listRecords()[0]!;
     assert.equal(record.date, '2026-10-07'); // converted from trusted receipt time in the local Asia/Shanghai timezone
     assert.equal(record.scopeId, 'reading');
+    await handleSessionCommand({ ...ctx.options, msg: { ...ctx.options.msg, messageId: 'message-2' }, command: parseCommand('/daily add reading Author argues attention is limited :: I disagree with the conclusion') });
+    const reading = ctx.dailyRecords.listRecords().find((item) => item.source.sourceId === 'message-2')!;
+    assert.equal(reading.authorView, 'Author argues attention is limited');
+    assert.equal(reading.userView, 'I disagree with the conclusion');
     assert.equal(ctx.dailyRecords.listReminders().length, 0);
     assert.match(ctx.replies.at(-1)!, /不会自动变成长久偏好或提醒/);
 

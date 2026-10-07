@@ -17,7 +17,7 @@ export type SlashCommand =
   | { name: 'career'; action: 'feedback'; resumeId: string; summary: string; weakPoint: string }
   | { name: 'career'; action: 'review'; learningId: string; score: number }
   | { name: 'daily'; action: 'list' }
-  | { name: 'daily'; action: 'add'; kind: 'daily' | 'reading' | 'exploration'; content: string }
+  | { name: 'daily'; action: 'add'; kind: 'daily' | 'reading' | 'exploration'; content: string; authorView?: string; userView?: string }
   | { name: 'daily'; action: 'recap'; from: string; through: string }
   | { name: 'daily'; action: 'scope'; recordId: string; scopeId: string | null }
   | { name: 'reminder'; action: 'list' }
@@ -59,6 +59,12 @@ export function parseCommand(text: string): SlashCommand | undefined {
   if (dailyMatch) {
     const args = dailyMatch[1]?.trim() ?? '';
     if (!args || args === 'list') return { name: 'daily', action: 'list' };
+    const reading = /^add\s+reading\s+([\s\S]+?)\s*::\s*([\s\S]+)$/.exec(args);
+    if (reading?.[1]?.trim() && reading[2]?.trim()) {
+      const authorView = reading[1].trim();
+      const userView = reading[2].trim();
+      return { name: 'daily', action: 'add', kind: 'reading', content: `用户观点：${userView}`, authorView, userView };
+    }
     const add = /^add\s+(daily|reading|exploration)\s+([\s\S]+)$/.exec(args);
     if (add?.[2]?.trim()) return { name: 'daily', action: 'add', kind: add[1] as 'daily' | 'reading' | 'exploration', content: add[2].trim() };
     const recap = /^recap\s+(\d{4}-\d\d-\d\d)\s+(\d{4}-\d\d-\d\d)$/.exec(args);
