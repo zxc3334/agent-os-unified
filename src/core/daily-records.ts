@@ -141,10 +141,11 @@ function zonedLocalToIso(
 export function resolveRelativeDue(relativeDue: string, sourceInput: DailyRecordSource): string {
   const source = normalizeSource(sourceInput);
   const phrase = nonEmpty(relativeDue, 'relativeDue', 200).toLocaleLowerCase();
+  if (/\bor\b|还是|或者/.test(phrase)) throw new Error('ambiguous clock time; the phrase contains alternatives');
   let dayOffset: number;
-  if (/\bday after tomorrow\b|\bin two days\b/.test(phrase) || phrase.includes('后天')) dayOffset = 2;
-  else if (/\btomorrow\b/.test(phrase) || phrase.includes('明天')) dayOffset = 1;
-  else if (/\btoday\b/.test(phrase) || phrase.includes('今天')) dayOffset = 0;
+  if (/\bday after tomorrow\b|\bin two days\b|后天/.test(phrase)) dayOffset = 2;
+  else if (/\btomorrow\b|明天/.test(phrase)) dayOffset = 1;
+  else if (/\btoday\b|今天/.test(phrase)) dayOffset = 0;
   else throw new Error('relativeDue must specify today, tomorrow, or the day after tomorrow');
 
   const english = phrase.match(/(?:at\s*)?(\d{1,2})(?::(\d{2}))?\s*(am|pm)?/i);
@@ -160,12 +161,14 @@ export function resolveRelativeDue(relativeDue: string, sourceInput: DailyRecord
     hour = chineseNumber(chinese[1]);
     minute = chinese[2] ? Number(chinese[2]) : chineseNumber(chinese[3]);
     const period = phrase.match(/上午|早上|中午|下午|晚上/)?.[0];
+    if (!period && hour >= 1 && hour <= 12) throw new Error('ambiguous clock time; specify morning/evening or 24-hour time');
     if (period === '下午' || period === '晚上') hour = hour === 12 ? hour : hour + 12;
     else if (period === '中午' && hour < 11) hour += 12;
     else if ((period === '上午' || period === '早上') && hour === 12) hour = 0;
   } else if (english) {
     hour = Number(english[1]);
     minute = Number(english[2] ?? 0);
+    if (!english[3] && hour >= 1 && hour <= 12) throw new Error('ambiguous clock time; specify am/pm or 24-hour time');
     if (english[3]?.toLowerCase() === 'pm' && hour < 12) hour += 12;
     if (english[3]?.toLowerCase() === 'am' && hour === 12) hour = 0;
   } else {

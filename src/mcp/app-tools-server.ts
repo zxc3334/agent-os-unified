@@ -9,6 +9,7 @@ import { ApprovalRequestSchema } from '../core/approval.js';
 import { SaveMemorySchema } from '../core/save-memory.js';
 import { RememberPersonalMemorySchema, SearchPersonalMemorySchema } from '../core/personal-memory-tool.js';
 import { CaptureDailyRecordSchema, CreatePersonalReminderSchema, SearchDailyRecordsSchema } from '../core/daily-record-tool.js';
+import { CreateDailyReminderToolSchema } from '../core/daily-reminder-tool.js';
 import {
   CLARIFICATION_TOOL_NAME,
   PRODUCT_SPEC_TOOL_NAME,
@@ -21,6 +22,7 @@ import {
   CAPTURE_DAILY_RECORD_TOOL_NAME,
   SEARCH_DAILY_RECORDS_TOOL_NAME,
   CREATE_PERSONAL_REMINDER_TOOL_NAME,
+  CREATE_DAILY_REMINDER_TOOL_NAME,
 } from '../cli/app-tools.js';
 
 const server = new McpServer({
@@ -303,6 +305,38 @@ server.registerTool(CREATE_PERSONAL_REMINDER_TOOL_NAME, {
   description: '仅在用户明确要求提醒时调用；relativeDue 必须包含日期和具体时间，例如“明天上午9点”。时间由 Agent OS 按可信消息接收时间和时区解析。创建成功表示已持久安排，不等于已送达。',
   inputSchema: CreatePersonalReminderSchema,
 }, async (input) => callPrivateDailyTool('/api/personal-reminders/create', CreatePersonalReminderSchema, input));
+
+server.registerTool(
+  CREATE_DAILY_REMINDER_TOOL_NAME,
+  {
+    title: '创建个人提醒',
+    description: [
+      '仅当用户明确要求提醒时调用；不要因为用户提到某个日期或生日就自动安排提醒。',
+      'content 写提醒事项。dueAt 只能是包含时区的完整 ISO 时间；relativeDue 可写“明天下午 3 点”等相对原消息时间的明确时间。',
+      '如果用户没有给出具体时间，或时间有上午/下午歧义，不要猜；传入当前掌握的信息，由工具返回 needs_clarification 和要问的问题。',
+      '只有 status=created 才表示提醒已持久保存；needs_clarification 时先问用户，invalid 时请修正参数。',
+    ].join(''),
+    inputSchema: CreateDailyReminderToolSchema,
+  },
+  async (input) => {
+    const token = process.env.AGENT_OS_DAILY_REMINDER_TOKEN;
+    const port = Number(process.env.AGENT_OS_DAILY_REMINDER_API_PORT);
+    if (!token || !Number.isInteger(port) || port < 1 || port > 65_535) {
+      return { content: [{ type: 'text', text: JSON.stringify({ status: 'invalid', code: 'unauthorized', message: '当前执行没有个人提醒写入授权；提醒未创建。' }) }] };
+    }
+    try {
+      const response = await fetch(`http://127.0.0.1:${port}/api/daily-reminders/create`, {
+        method: 'POST', headers: { 'content-type': 'application/json', 'x-daily-reminder-token': token },
+        body: JSON.stringify(input),
+      });
+      const result = await response.json().catch(() => ({ status: 'invalid', code: 'invalid_input', message: '提醒服务返回了无法读取的结果；提醒未确认创建。' }));
+      // Clarification and validation are normal, actionable outcomes—not opaque tool failures.
+      return { content: [{ type: 'text', text: JSON.stringify(result) }], ...(response.ok ? {} : { isError: true }) };
+    } catch (error) {
+      return { content: [{ type: 'text', text: JSON.stringify({ status: 'invalid', code: 'service_unavailable', message: `提醒服务不可用，提醒未创建：${(error as Error).message}` }) }], isError: true };
+    }
+  },
+);
 
 server.registerTool(
   SAVE_MEMORY_TOOL_NAME,

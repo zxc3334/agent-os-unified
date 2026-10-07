@@ -1,6 +1,6 @@
 # 日常记录、阅读与提醒
 
-- Status: in-progress (broader entry integration blocked by 05)
+- Status: in-progress (safe reminder clarification added; broader entry integration blocked by 05)
 - Blocked by: 05-personal-entry-skills
 - Milestone: D
 - Spec: [spec.md](../spec.md)
@@ -8,6 +8,12 @@
 ## What to build
 
 支持阅读/探索/生活记录与按需日/周回顾。日期事实与提醒分开，按源接收时间解析相对日期；提醒具备幂等创建、取消/改期、送达未知/失败/错过恢复状态。
+
+## Implementation progress
+
+- Implemented an owner-private MCP reminder tool with trusted message receipt time/timezone and durable persistence. Missing date/time and ambiguous clock input return explicit `needs_clarification` outcomes; invalid or date-only timestamps return validation outcomes without creating a reminder. Relative-time parsing rejects unqualified 12-hour clocks and common conflicting alternatives.
+- Behavioral coverage verifies no reminder is written for missing, ambiguous, unsupported-date, or invalid timestamp input; a clear relative time is stored using the trusted source context.
+- Remaining: broader reminder lifecycle delivery/recovery wiring and record capture/review flows are not part of this slice.
 
 ## Acceptance criteria
 
@@ -37,3 +43,9 @@
 
 - Follow-up: failed reminders can now be retried by the owner in private chat with `/reminder retry <ID>`. Only `failed` reminders are eligible; retry preserves the previous attempt history and returns to `scheduled`, while successful delivery remains contingent on a transport receipt. Tests cover retry eligibility, persistence behavior, scheduling callback, and honest response wording.
 - Verification after this change: `pnpm test` (86/86), `pnpm build`, `git diff --check`.
+
+
+- Follow-up: added an owner-private conversational reminder tool that returns `needs_clarification` for missing or ambiguous dates/times instead of guessing or persisting. Successful reminders use the existing authoritative daily-record/reminder store, trusted private delivery target, and receipt-aware scheduler (no parallel reminder database).
+- Tests cover missing/ambiguous timing without writes, trusted actor/token checks, scheduling after durable creation, delivery-target binding, and CLI tool-name normalization.
+- Verification: `pnpm test` (114/114), `pnpm build`, `git diff --check`.
+- Remaining: richer feedback and summary/review integration; ticket remains in progress.

@@ -11,6 +11,7 @@ export const SEARCH_PERSONAL_MEMORY_TOOL_NAME = 'search_personal_memory';
 export const CAPTURE_DAILY_RECORD_TOOL_NAME = 'capture_daily_record';
 export const SEARCH_DAILY_RECORDS_TOOL_NAME = 'search_daily_records';
 export const CREATE_PERSONAL_REMINDER_TOOL_NAME = 'create_personal_reminder';
+export const CREATE_DAILY_REMINDER_TOOL_NAME = 'create_daily_reminder';
 export const CLAUDE_CLARIFICATION_TOOL_NAME =
   `mcp__agent_os__${CLARIFICATION_TOOL_NAME}`;
 export const CLAUDE_PRODUCT_SPEC_TOOL_NAME =

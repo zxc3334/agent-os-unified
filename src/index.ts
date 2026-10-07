@@ -27,8 +27,10 @@ import {
 import { resolveMentions, extractResourceKeys } from './im/message-parser.js';
 import { parseCliRequest, parseCommand } from './core/command-parser.js';
 import { PersonalMemoryStore } from './core/personal-memory.js';
+import { JsonDailyRecordsReminders } from './core/daily-records.js';
 import { PersonalTaskMemoryProvider } from './app/personal-task-memory.js';
 import { PersonalMemoryToolBridge } from './app/personal-memory-bridge.js';
+import { DailyReminderToolBridge } from './app/daily-reminder-tool-bridge.js';
 import { JsonPersonalSkillRegistry } from './core/personal-skills.js';
 import { JsonCareerPreparation } from './core/career-preparation.js';
 import { JsonBlogAssociations } from './core/blog-associations.js';
@@ -36,7 +38,6 @@ import { BlogEntryService } from './app/blog-entry-service.js';
 import { dailyRecordSearchProvider, personalMemorySearchProvider, textMaterialSearchProvider } from './core/blog-source-retriever.js';
 import { JsonTextMaterialLibrary } from './core/text-materials.js';
 import { CareerReviewSchedulerAdapter } from './core/review-scheduler.js';
-import { JsonDailyRecordsReminders } from './core/daily-records.js';
 import { PersonalReminderScheduler } from './app/personal-reminder-scheduler.js';
 import { SessionManager } from './core/session-manager.js';
 import { JsonSessionStore } from './core/session-store.js';
@@ -180,6 +181,12 @@ const personalMemoryBridge = personalMemoryStore
   : undefined;
 const personalMemoryApiPort = personalMemoryBridge
   ? await personalMemoryBridge.start(Number(process.env.AGENT_OS_PERSONAL_MEMORY_API_PORT ?? 0))
+  : undefined;
+const dailyReminderBridge = configuredOwnerOpenId
+  ? new DailyReminderToolBridge(dailyRecords, (reminder) => personalReminderScheduler.schedule(reminder))
+  : undefined;
+const dailyReminderApiPort = dailyReminderBridge
+  ? await dailyReminderBridge.start(Number(process.env.AGENT_OS_DAILY_REMINDER_API_PORT ?? 0))
   : undefined;
 const processedDocumentCommentEvents = new Set<string>();
 const documentCommentQueues = new Map<string, Promise<void>>();
@@ -607,6 +614,15 @@ async function startConfiguredBot(
       const progressHeartbeat = setInterval(renderProgress, 1_000);
       progressHeartbeat.unref();
 
+      const reminderInvocation = dailyReminderBridge && configuredOwnerOpenId
+        && msg.chatType === 'p2p'
+        && msg.senderOpenId === configuredOwnerOpenId
+        ? dailyReminderBridge.issue({
+            actorId: msg.senderOpenId, ownerId: configuredOwnerOpenId,
+            source: { sourceId: msg.messageId, actorId: msg.senderOpenId, receivedAt: msg.receivedAt, timezone: Intl.DateTimeFormat().resolvedOptions().timeZone || 'UTC' },
+            deliveryTarget: { botId: config.id, chatId: msg.chatId },
+          })
+        : undefined;
       const memoryInvocation = personalMemoryBridge && personalMemoryStore
         && msg.chatType === 'p2p'
         && msg.senderOpenId === configuredOwnerOpenId
@@ -629,6 +645,10 @@ async function startConfiguredBot(
         // agy 没有项目级 MCP 配置，只能走全局垫片；垫片靠它找到本次运行的安装目录。
         AGENT_OS_HOME: resolve(import.meta.dirname, '..'),
       };
+      if (reminderInvocation && dailyReminderApiPort !== undefined) {
+        cliEnv.AGENT_OS_DAILY_REMINDER_API_PORT = String(dailyReminderApiPort);
+        cliEnv.AGENT_OS_DAILY_REMINDER_TOKEN = reminderInvocation.token;
+      }
       if (memoryInvocation && personalMemoryApiPort !== undefined) {
         cliEnv.AGENT_OS_PERSONAL_MEMORY_API_PORT = String(personalMemoryApiPort);
         cliEnv.AGENT_OS_PERSONAL_MEMORY_TOKEN = memoryInvocation.token;
@@ -1158,6 +1178,7 @@ async function startConfiguredBot(
             console.error('[会话] 保存空闲状态失败:', (error as Error).message);
           }
           memoryInvocation?.release();
+          reminderInvocation?.release();
         })
         .catch((error) => {
           console.error('[任务] 回传或收尾失败:', (error as Error).message);
