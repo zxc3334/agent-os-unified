@@ -26,8 +26,11 @@ export type SlashCommand =
   | { name: 'task'; action: 'recent' }
   | { name: 'task'; action: 'trace'; taskId: string }
   | { name: 'blog'; action: 'search'; query: string }
+  | { name: 'blog'; action: 'propose'; topic: string }
   | { name: 'blog'; action: 'propose'; query: string; intendedUse: string }
+  | { name: 'blog'; action: 'draft'; proposalId: string; audience: 'private' | 'public'; topic: string }
   | { name: 'blog'; action: 'decide'; proposalId: string; decision: 'accepted' | 'rejected' | 'no-connection' }
+  | { name: 'blog'; action: 'authorize'; proposalId: string; sourceId: string; authorization: 'authorized' | 'denied' }
   | { name: 'daily'; action: 'list' }
   | { name: 'daily'; action: 'add'; kind: 'daily' | 'reading' | 'exploration'; content: string; authorView?: string; userView?: string }
   | { name: 'daily'; action: 'recap'; from: string; through: string }
@@ -112,8 +115,14 @@ export function parseCommand(text: string): SlashCommand | undefined {
     if (search?.[1]?.trim()) return { name: 'blog', action: 'search', query: search[1].trim() };
     const propose = /^propose\s+([\s\S]+?)\s*::\s*([\s\S]+)$/.exec(args);
     if (propose?.[1]?.trim() && propose[2]?.trim()) return { name: 'blog', action: 'propose', query: propose[1].trim(), intendedUse: propose[2].trim() };
+    const topic = /^propose\s+([\s\S]+)$/.exec(args);
+    if (topic?.[1]?.trim()) return { name: 'blog', action: 'propose', topic: topic[1].trim() };
+    const draft = /^draft\s+([A-Za-z0-9][A-Za-z0-9_-]{0,99})\s+(private|public)\s+::\s*([\s\S]+)$/.exec(args);
+    if (draft?.[3]?.trim()) return { name: 'blog', action: 'draft', proposalId: draft[1]!, audience: draft[2] as 'private' | 'public', topic: draft[3].trim() };
     const decide = /^decide\s+([A-Za-z0-9][A-Za-z0-9_-]{0,99})\s+(accept|reject|none)$/.exec(args);
     if (decide) return { name: 'blog', action: 'decide', proposalId: decide[1]!, decision: decide[2] === 'accept' ? 'accepted' : decide[2] === 'reject' ? 'rejected' : 'no-connection' };
+    const authorize = /^authorize\s+([A-Za-z0-9][A-Za-z0-9_-]{0,99})\s+([A-Za-z0-9][A-Za-z0-9_-]{0,199})\s+(allow|deny)$/.exec(args);
+    if (authorize) return { name: 'blog', action: 'authorize', proposalId: authorize[1]!, sourceId: authorize[2]!, authorization: authorize[3] === 'allow' ? 'authorized' : 'denied' };
     return undefined;
   }
   const affairMatch = AFFAIR_RE.exec(value);

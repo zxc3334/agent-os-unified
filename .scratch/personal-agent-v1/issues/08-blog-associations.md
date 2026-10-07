@@ -35,3 +35,7 @@
 - Tests verify an existing proposal becomes inactive while the reclassified record and its content remain available in the new scope.
 
 - Follow-up: owner-private `/daily delete <ID>` now invalidates a scoped reference with reason `deleted` before clearing the source record’s text and stance fields. Existing reminders are detached rather than cancelled; tests cover persisted deletion, privacy cleanup, blog-reference invalidation, and reminder preservation.
+
+- Follow-up: added an owner-private `/blog propose <topic>` flow through the replaceable `BlogWritingModel` seam, plus `/blog draft`, per-source `/blog authorize`, and explicit `/blog decide` handling. The existing `/blog propose <query> :: <intended use>` command remains compatible. Draft generation enforces source activity, provenance/citation allowlists, stance separation, and explicit authorization for public use.
+- The runtime wires retrieval providers into the workflow but intentionally does not configure a production model adapter. Until one is supplied, proposals/drafts report model unavailability rather than fabricating output. This is a remaining acceptance boundary, so the ticket stays in progress.
+- Verification pending integration: blog workflow and private command-entry tests have been added; full suite/build will be recorded after merge resolution.

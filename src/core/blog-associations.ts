@@ -39,6 +39,9 @@ export interface BlogDraftStatement {
 }
 export interface StancePreservingBlogDraft {
   id: string;
+  /** Optional for backward compatibility with drafts written before the writing workflow. */
+  outline?: BlogDraftStatement[];
+  unresolvedQuestions?: string[];
   proposalId: string;
   createdAt: string;
   audience: 'private' | 'public';
@@ -75,6 +78,8 @@ export interface CreateBlogDraftInput {
   authorViews?: readonly BlogDraftStatement[];
   assistantSuggestions?: readonly BlogDraftStatement[];
   hypotheses?: readonly BlogDraftStatement[];
+  outline?: readonly BlogDraftStatement[];
+  unresolvedQuestions?: readonly string[];
 }
 
 const MAX_TEXT = 4_000;
@@ -246,6 +251,14 @@ export class JsonBlogAssociations {
     });
   }
 
+  /** True only when each exact source reference in this proposal has an explicit public-use grant. */
+  areProposalSourcesPubliclyAuthorized(proposalId: string): boolean {
+    const proposal = this.state.proposals.find((item) => item.id === proposalId);
+    return !!proposal && proposal.sources.every((source) => this.state.publicUseAuthorizations.some(
+      (item) => item.proposalId === proposalId && item.sourceId === source.id && item.authorization === 'authorized',
+    ));
+  }
+
   /** Creates structured, stance-separated draft content. Public drafts fail closed per cited source. */
   createDraft(input: CreateBlogDraftInput): StancePreservingBlogDraft {
     if (!['private', 'public'].includes(input.audience)) throw new Error('unsupported draft audience');
@@ -255,6 +268,8 @@ export class JsonBlogAssociations {
     if (!this.areProposalSourcesActive(proposal.id)) throw new Error('association contains revoked or deleted sources');
     const draft: StancePreservingBlogDraft = {
       id: randomUUID(), proposalId: proposal.id, createdAt: iso(input.createdAt, 'createdAt'), audience: input.audience,
+      ...(input.outline ? { outline: normalizeStatements(input.outline, 'outline') } : {}),
+      ...(input.unresolvedQuestions ? { unresolvedQuestions: input.unresolvedQuestions.map((question) => nonEmpty(question, 'unresolvedQuestion')) } : {}),
       userClaims: normalizeStatements(input.userClaims, 'userClaims'),
       authorViews: normalizeStatements(input.authorViews, 'authorViews'),
       assistantSuggestions: normalizeStatements(input.assistantSuggestions, 'assistantSuggestions'),
@@ -262,11 +277,13 @@ export class JsonBlogAssociations {
     };
     const proposalSourceIds = new Set(proposal.sources.map((source) => source.id));
     const citedIds = [...new Set([
-      ...draft.userClaims, ...draft.authorViews, ...draft.assistantSuggestions, ...draft.hypotheses,
+      ...(draft.outline ?? []), ...draft.userClaims, ...draft.authorViews, ...draft.assistantSuggestions, ...draft.hypotheses,
     ].flatMap((statement) => statement.sourceIds))];
     if (citedIds.some((id) => !proposalSourceIds.has(id))) throw new Error('draft cites a source outside the accepted proposal');
     if (draft.audience === 'public') {
-      const unauthorized = citedIds.filter((sourceId) => !this.state.publicUseAuthorizations.some(
+      // Model-generated outline/questions may be informed by sources without carrying a
+      // citation on every field. Therefore every proposal source needs an explicit grant.
+      const unauthorized = proposal.sources.map((source) => source.id).filter((sourceId) => !this.state.publicUseAuthorizations.some(
         (item) => item.proposalId === proposal.id && item.sourceId === sourceId && item.authorization === 'authorized',
       ));
       if (unauthorized.length) throw new Error(`public use not explicitly authorized for source(s): ${unauthorized.join(', ')}`);

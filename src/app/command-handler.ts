@@ -27,6 +27,7 @@ import type { JsonCareerPreparation } from "../core/career-preparation.js";
 import type { CareerReviewSchedulerAdapter } from "../core/review-scheduler.js";
 import type { JsonTextMaterialLibrary } from "../core/text-materials.js";
 import type { BlogEntryService } from "./blog-entry-service.js";
+import type { BlogWritingWorkflow } from "./blog-writing-workflow.js";
 import type { JsonBlogAssociations } from "../core/blog-associations.js";
 import type { JsonDailyRecordsReminders } from "../core/daily-records.js";
 import { resolveRelativeDue } from "../core/daily-records.js";
@@ -54,6 +55,7 @@ export async function handleSessionCommand(options: {
   careerReviewScheduler?: CareerReviewSchedulerAdapter;
   textMaterials?: JsonTextMaterialLibrary;
   blogEntryService?: BlogEntryService;
+  blogWorkflow?: BlogWritingWorkflow;
   blogAssociations?: JsonBlogAssociations;
   dailyRecords?: JsonDailyRecordsReminders;
   personalReminderScheduler?: PersonalReminderScheduler;
@@ -79,6 +81,7 @@ export async function handleSessionCommand(options: {
     careerReviewScheduler,
     textMaterials,
     blogEntryService,
+    blogWorkflow,
     blogAssociations,
     dailyRecords,
     personalReminderScheduler,
@@ -315,17 +318,17 @@ export async function handleSessionCommand(options: {
       await bot.reply(msg.messageId, "博客素材与关联仅限所有者在私聊中使用。", hasThread);
       return "handled";
     }
-    if (!blogEntryService || !personalMemoryStore) {
-      await bot.reply(msg.messageId, "博客关联暂不可用；请检查本地记忆与资料库配置。", hasThread);
-      return "handled";
-    }
     try {
-      const spaces = await personalMemoryStore.listSpaces();
+      const spaces = personalMemoryStore ? await personalMemoryStore.listSpaces() : [];
       const authorizedSpaceIds = session.memorySpaceIds === undefined
         ? spaces.map((space) => space.id)
         : spaces.map((space) => space.id).filter((id) => session.memorySpaceIds?.includes(id));
       const safe = (value: string, max = 500) => Array.from(value.replace(/[\r\n\t\u0000-\u001f\u007f]/g, " ")).slice(0, max).join("");
       if (command.action === "search") {
+        if (!blogEntryService) {
+          await bot.reply(msg.messageId, "博客来源检索暂不可用；没有执行检索。", hasThread);
+          return "handled";
+        }
         const result = await blogEntryService.search(command.query, authorizedSpaceIds);
         const lines = result.sources.slice(0, 6).map((source) => {
           const place = [source.provenance.date, source.provenance.location].filter(Boolean).join(" · ");
@@ -333,7 +336,27 @@ export async function handleSessionCommand(options: {
         });
         const unavailable = result.unavailableKinds.length ? `\n部分来源暂不可用：${result.unavailableKinds.join("、")}` : "";
         await bot.reply(msg.messageId, `${lines.length ? `授权范围内找到 ${lines.length} 条候选来源：\n${lines.join("\n")}` : "授权范围内没有找到相关来源。"}${unavailable}\n候选只供参考，不会自动拼成你的观点。`, hasThread);
+      } else if (command.action === "propose" && "topic" in command) {
+        if (!blogWorkflow) {
+          await bot.reply(msg.messageId, "博客写作能力暂不可用：没有配置工作流适配器。", hasThread);
+          return "handled";
+        }
+        const context = { actorId: trustedOwnerOpenId, trustedOwnerId: trustedOwnerOpenId, chatType: "p2p" as const, authorizedSpaceIds };
+        const result = await blogWorkflow.propose({ context, topic: command.topic, operationId: `message:${msg.messageId}`, now: msg.receivedAt });
+        if (result.status === "proposed") {
+          const lines = result.proposals.map((item) => `关联建议 [${item.id}]：${item.reasoning}；用途：${item.intendedUse}；来源：${item.sources.map((source) => `${source.kind}/${source.spaceId}/${source.id}`).join("、")}。请用 /blog decide ${item.id} accept|reject|none 决定。`);
+          await bot.reply(msg.messageId, lines.join("\n"), hasThread);
+        } else {
+          const unavailable = result.unavailableKinds.length ? `；不可用来源：${result.unavailableKinds.join("、")}` : "";
+          await bot.reply(msg.messageId, result.status === "no-relevant-sources"
+            ? `没有找到足够的相关资料，不会强行建立关联${unavailable}。`
+            : `模型适配器暂不可用，未生成关联建议${unavailable}。`, hasThread);
+        }
       } else if (command.action === "propose") {
+        if (!blogEntryService || !personalMemoryStore) {
+          await bot.reply(msg.messageId, "旧版指定用途关联暂不可用；可尝试 /blog propose <主题>。", hasThread);
+          return "handled";
+        }
         const result = await blogEntryService.propose({
           actorId: trustedOwnerOpenId, operationId: `blog:${msg.messageId}`, createdAt: msg.receivedAt,
           query: command.query, intendedUse: command.intendedUse, authorizedSpaceIds,
@@ -345,9 +368,32 @@ export async function handleSessionCommand(options: {
           const refs = result.sources.map((item) => `${item.reference.kind} ${item.reference.id}（${item.reference.spaceId}）：${safe(item.excerpt, 240)}`).join("\n");
           await bot.reply(msg.messageId, `候选关联 [${result.proposalId}] 已保存，尚未接受为你的观点。\n${refs}\n请判断：/blog decide ${result.proposalId} accept|reject|none`, hasThread);
         }
-      } else {
-        const decided = blogEntryService.decide(command.proposalId, trustedOwnerOpenId, command.decision, msg.receivedAt);
+      } else if (command.action === "decide") {
+        const context = { actorId: trustedOwnerOpenId, trustedOwnerId: trustedOwnerOpenId, chatType: "p2p" as const, authorizedSpaceIds };
+        const decided = blogWorkflow
+          ? blogWorkflow.decide(context, command.proposalId, command.decision, msg.receivedAt)
+          : blogEntryService?.decide(command.proposalId, trustedOwnerOpenId, command.decision, msg.receivedAt);
         await bot.reply(msg.messageId, decided ? `候选关联已记录为 ${command.decision}；原始记忆与资料未修改。` : "没有找到属于你的关联候选，或该候选已无法更新。", hasThread);
+      } else if (command.action === "authorize") {
+        if (!blogWorkflow) throw new Error("博客写作能力暂不可用");
+        blogWorkflow.authorizePublicSource(
+          { actorId: trustedOwnerOpenId, trustedOwnerId: trustedOwnerOpenId, chatType: "p2p", authorizedSpaceIds },
+          command.proposalId, command.sourceId, command.authorization, msg.receivedAt,
+        );
+        await bot.reply(msg.messageId, `来源 ${command.sourceId} 的公开使用授权已更新。`, hasThread);
+      } else {
+        if (!blogWorkflow) throw new Error("博客写作能力暂不可用");
+        const context = { actorId: trustedOwnerOpenId, trustedOwnerId: trustedOwnerOpenId, chatType: "p2p" as const, authorizedSpaceIds };
+        const result = await blogWorkflow.draft({ context, topic: command.topic, operationId: `message:${msg.messageId}`, now: msg.receivedAt, proposalId: command.proposalId, audience: command.audience });
+        if (result.status === "drafted") {
+          const draft = result.draft;
+          const lines = ["大纲：", ...(draft.outline ?? []).map((item) => `- ${item.text} [${item.sourceIds.join(", ")}]`), "草稿观点：", ...draft.userClaims.map((item) => `- 我的观点：${item.text}`), ...draft.authorViews.map((item) => `- 作者观点：${item.text}`), ...draft.assistantSuggestions.map((item) => `- 助理建议：${item.text}`), ...draft.hypotheses.map((item) => `- 假设：${item.text}`), "待解决问题：", ...(draft.unresolvedQuestions ?? []).map((item) => `- ${item}`)];
+          await bot.reply(msg.messageId, lines.join("\n").slice(0, 3_500), hasThread);
+        } else {
+          await bot.reply(msg.messageId, result.status === "model-unavailable"
+            ? "模型适配器暂不可用，未生成草稿。"
+            : "提案来源当前无法读取，可能已撤权、删除或检索不可用；未生成草稿。", hasThread);
+        }
       }
     } catch {
       await bot.reply(msg.messageId, "博客关联操作暂时失败；未能确认已保存任何结果。", hasThread);

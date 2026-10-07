@@ -37,6 +37,7 @@ import { JsonCareerPreparation } from './core/career-preparation.js';
 import { explicitlyRequestsCareerFeedbackSave } from './core/career-feedback-tool.js';
 import { JsonBlogAssociations } from './core/blog-associations.js';
 import { BlogEntryService } from './app/blog-entry-service.js';
+import { BlogWritingWorkflow } from './app/blog-writing-workflow.js';
 import { dailyRecordSearchProvider, personalMemorySearchProvider, textMaterialSearchProvider } from './core/blog-source-retriever.js';
 import { JsonTextMaterialLibrary } from './core/text-materials.js';
 import { CareerReviewSchedulerAdapter } from './core/review-scheduler.js';
@@ -186,12 +187,18 @@ const careerFeedbackApiPort = careerFeedbackBridge
   : undefined;
 const dailyRecords = new JsonDailyRecordsReminders(join(privateDataRoot, 'daily-records.json'));
 const blogAssociations = new JsonBlogAssociations(join(privateDataRoot, 'blog-associations.json'));
-const blogEntryService = personalMemoryStore
-  ? new BlogEntryService(blogAssociations, {
-      memories: personalMemorySearchProvider(personalMemoryStore),
-      dailyRecords: dailyRecordSearchProvider(dailyRecords),
-      materials: textMaterials ? textMaterialSearchProvider(textMaterials) : { async search() { return []; } },
-    })
+const blogSources = personalMemoryStore ? {
+  memories: personalMemorySearchProvider(personalMemoryStore),
+  dailyRecords: dailyRecordSearchProvider(dailyRecords),
+  materials: textMaterials ? textMaterialSearchProvider(textMaterials) : { async search() { return []; } },
+} : undefined;
+const blogEntryService = blogSources
+  ? new BlogEntryService(blogAssociations, blogSources)
+  : undefined;
+// Keep the model seam explicit: until a real provider is configured, the workflow
+// can retrieve sources but must not pretend to generate model-backed associations/drafts.
+const blogWorkflow = blogSources
+  ? new BlogWritingWorkflow(blogAssociations, blogSources)
   : undefined;
 const personalReminderScheduler = new PersonalReminderScheduler({
   store: dailyRecords,
@@ -522,6 +529,7 @@ async function startConfiguredBot(
         careerReviewScheduler,
         textMaterials,
         blogEntryService,
+        blogWorkflow,
         blogAssociations,
         dailyRecords,
         personalReminderScheduler,

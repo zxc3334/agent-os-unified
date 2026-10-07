@@ -47,7 +47,7 @@ test('blog command parser accepts only bounded search, propose and decision form
   assert.deepEqual(parseCommand('/blog decide proposal_1 none'), {
     name: 'blog', action: 'decide', proposalId: 'proposal_1', decision: 'no-connection',
   });
-  assert.equal(parseCommand('/blog propose only-query'), undefined);
+  assert.deepEqual(parseCommand('/blog propose only-query'), { name: 'blog', action: 'propose', topic: 'only-query' });
   assert.equal(parseCommand('/blog decide id maybe'), undefined);
 });
 
