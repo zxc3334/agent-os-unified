@@ -23,7 +23,7 @@
 - Source lifecycle support now persists tombstones for exact `(kind, spaceId, id)` references with `revoked` or `deleted` reason. Legacy v1 store files remain readable. Tombstoned sources cannot be newly proposed, accepted, authorized for public use or drafted from; reusable-draft queries filter historical drafts that cite them, while audit history remains available.
 - Tests cover authorization, source immutability, stance preservation, public-use gates, bounded retrieval, owner/group restrictions, decisions, revocation/deletion, and legacy-state migration.
 - Verification: the source-lifecycle slice passed its focused core tests (77/77) in the implementation worktree; after integration, main-branch `pnpm test` passes 107/107 with `pnpm build` and `git diff --check`.
-- Remaining: authoritative memory/material/daily-record revocation and deletion events are not yet propagated automatically into blog tombstones; model-generated proposal, outline and draft workflow remains. Ticket remains in progress.
+- Current boundary: owner-triggered memory rejection/forgetting, material revocation, and daily-record reclassification/deletion now write exact-source tombstones; tests cover the source lifecycle and retryable command path. Model-assisted association reasoning, outline and draft workflow remains, and the cross-store writes are sequential rather than a transactional outbox. Ticket remains in progress.
 
 
 - Follow-up: owner-private `/memory reject|forget` and `/career material revoke` now tombstone the exact `(kind, spaceId, id)` reference in the blog-association store after the authoritative source mutation succeeds. Historical proposals/drafts remain auditable but are no longer reusable.
