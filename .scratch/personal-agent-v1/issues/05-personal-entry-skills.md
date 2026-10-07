@@ -27,3 +27,11 @@
 - Added owner-only `/memory spaces` and `/memory scope <space-id|all>` controls. The selected allowlist is persisted with the Feishu thread/session, validated against current spaces, and applies only to that matter; memory commands are restricted to the owner’s direct messages.
 - Verification: `pnpm test` (48/48), `pnpm build`, and `git diff --check` pass.
 - Remaining: affair continuation/selection beyond current-thread scoping, and context preparation for scheduled/continuation adapters. The current automatic snapshot and on-demand search remain restricted to the configured owner’s direct Feishu message path.
+
+
+### Space management update
+
+- Added owner-only `/memory space create <name>` and `/memory space rename <id> <name>`. Creation uses the store's stable normalized ID and immediately limits the current matter to the new space; rename preserves IDs and existing matter grants.
+- Tests cover parser behavior, durable create/rename and owner-DM gate via temporary storage.
+- Verification: `pnpm test` (65/65), `pnpm build`, `git diff --check`.
+- Remaining: cross-thread affair selection/continuation and memory-context preparation for scheduled and continuation runs. Ticket remains in progress.

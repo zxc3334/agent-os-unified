@@ -2,9 +2,9 @@
 
 - 日期：2026-10-07（Asia/Shanghai）
 - 修订：v1.1，吸收本地 Comet 代码基线 `2ae1c07` 的可适用机制；不复制其平台架构。
-- Status: ready-for-agent
-- Publication: 用户已授权开始实施；测试接缝确认为统一任务执行 Interface。
-- Required triage on publication: `ready-for-agent`
+- Status: in-progress
+- Publication: 用户已授权实施；当前按票据逐步交付和验证，测试接缝确认为统一任务执行 Interface。
+- Required triage on publication: `in-progress`
 
 ## Implementation Status
 
@@ -16,7 +16,7 @@ Statuses below describe the checked-in implementation, not the intended final ar
 | 02 提取恢复 | Complete | Eligible-message trigger, explicit `/memory extract`, restart recovery, frozen/idempotent batches, original source identity/time, retry tests. |
 | 03 记忆审查反馈 | Complete | Owner-only `/memory` review/confirm/correct/reject/forget commands with temporary-store tests. |
 | 04 统一任务运行时 | In progress | Core runtime, ordinary-message/scheduled adapters, approval/clarification continuations (including product-spec retry), and document comments are wired. Engine switching now clears native-session IDs while preserving the Agent OS session, and active-run switching is rejected. Collaboration wiring, continuation end-to-end tests, affair summary carryover, and partial-result UI reconciliation remain. |
-| 05 个人入口与技能 | In progress | Owner-DM bounded memory context runs through the unified runtime preparation seam; owner-only `/memory spaces` and `/memory scope` configure a persisted per-thread space allowlist. Scoped search/save MCP tools and four user-enabled skill packs for career/interview, reading, research/blog, and daily-record tasks exist. Cross-thread affair selection/continuation and scheduled/continuation context wiring remain. |
+| 05 个人入口与技能 | In progress | Owner-DM bounded memory context runs through the unified runtime preparation seam; owner-only `/memory spaces` and `/memory scope` configure a persisted per-thread space allowlist. Scoped search/save MCP tools and four user-enabled skill packs for career/interview, reading, research/blog, and daily-record tasks exist. `/memory space create|rename` now manages stable user-defined spaces; creating a space scopes the current matter to it. Cross-thread affair selection/continuation and scheduled/continuation context wiring remain. |
 | 06 求职闭环 | In progress | Durable role/evidence/resume-proposal/mock-interview learning core, owner-only `/career` workflow, source-linked Markdown export, and bounded career context are implemented; project/material lookup, natural-language interview execution, and existing review scheduler integration remain. |
 | 07 日常记录与提醒 | In progress | Durable daily/reading/exploration records, scoped recaps, owner-only `/daily` and `/reminder` commands, and receipt-aware reminder delivery/recovery are implemented; natural-language capture/clarification and richer feedback remain. |
 | 08 博客关联与草稿 | Not started (blocked by 06 and 07) | No authorized cross-space association proposals, stance-aware drafting, or public-use checks yet. |

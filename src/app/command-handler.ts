@@ -274,10 +274,25 @@ export async function handleSessionCommand(options: {
       const allSpaceIds = spaces.map((space) => space.id);
       const authorizedSpaceIds = allSpaceIds;
       const names = new Map(spaces.map((space) => [space.id, space.name]));
+      if (command.action === "space-create") {
+        const created = await personalMemoryStore.createSpace(command.nameText);
+        await runtime.sessions.setMemorySpaceIds(session.id, [created.id]);
+        await bot.reply(msg.messageId, `已创建记忆空间「${safe(created.name, 100)}」[${created.id}]，并将本事项范围切换到该空间。`, hasThread);
+        return "handled";
+      }
+      if (command.action === "space-rename") {
+        if (!allSpaceIds.includes(command.spaceId)) {
+          await bot.reply(msg.messageId, "没有找到这个个人记忆空间。", hasThread);
+          return "handled";
+        }
+        const renamed = await personalMemoryStore.renameSpace(command.spaceId, command.nameText);
+        await bot.reply(msg.messageId, `记忆空间已改名为「${safe(renamed.name, 100)}」；稳定 ID 保持为 ${renamed.id}，已有事项授权不变。`, hasThread);
+        return "handled";
+      }
       if (command.action === "spaces") {
         const activeIds = session.memorySpaceIds;
         const lines = spaces.map((space) => `${activeIds === undefined || activeIds.includes(space.id) ? "✅" : "○"} ${space.name} — ${space.id}`);
-        await bot.reply(msg.messageId, `${lines.length ? lines.join("\n") : "尚无记忆空间。"}\n本事项当前：${activeIds === undefined ? "使用全部个人空间（仍只在相关时召回）" : activeIds.length ? "限定于已选空间" : "不读取个人记忆"}。\n设置：/memory scope <空间ID|all>`, hasThread);
+        await bot.reply(msg.messageId, `${lines.length ? lines.join("\n") : "尚无记忆空间。"}\n本事项当前：${activeIds === undefined ? "使用全部个人空间（仍只在相关时召回）" : activeIds.length ? "限定于已选空间" : "不读取个人记忆"}。\n设置：/memory scope <空间ID|all>；新增：/memory space create <名称>；改名：/memory space rename <空间ID> <新名称>`, hasThread);
         return "handled";
       }
       if (command.action === "scope") {

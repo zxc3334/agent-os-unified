@@ -38,6 +38,8 @@ test('memory command grammar leaves existing command parsing compatible', () => 
   assert.deepEqual(parseCommand('/memory recent 2'), { name: 'memory', action: 'recent', page: 2 });
   assert.deepEqual(parseCommand('/memory extract'), { name: 'memory', action: 'extract' });
   assert.deepEqual(parseCommand('/memory spaces'), { name: 'memory', action: 'spaces' });
+  assert.deepEqual(parseCommand('/memory space create 技术探索'), { name: 'memory', action: 'space-create', nameText: '技术探索' });
+  assert.deepEqual(parseCommand('/memory space rename reading 阅读'), { name: 'memory', action: 'space-rename', spaceId: 'reading', nameText: '阅读' });
   assert.deepEqual(parseCommand('/memory scope all'), { name: 'memory', action: 'scope', spaceId: 'all' });
   assert.deepEqual(parseCommand('/memory scope job-search'), { name: 'memory', action: 'scope', spaceId: 'job-search' });
   assert.deepEqual(parseCommand('/skills'), { name: 'skills', action: 'list' });
@@ -120,6 +122,13 @@ test('owner can inspect spaces and scope the current matter; group chats are den
 
     await handleSessionCommand({ ...ctx.options, command: parseCommand(`/memory scope ${ctx.space.id}`) });
     assert.match(ctx.replies.at(-1)!, /本事项的个人记忆范围已设为/);
+    await handleSessionCommand({ ...ctx.options, command: parseCommand('/memory space create 技术探索') });
+    const created = (await ctx.store.listSpaces()).find((space) => space.name === '技术探索');
+    assert.ok(created);
+    assert.match(ctx.replies.at(-1)!, /并将本事项范围切换到该空间/);
+    await handleSessionCommand({ ...ctx.options, command: parseCommand(`/memory space rename ${created.id} AI探索`) });
+    assert.equal((await ctx.store.listSpaces()).find((space) => space.id === created.id)?.name, 'AI探索');
+    assert.match(ctx.replies.at(-1)!, /稳定 ID 保持/);
 
     ctx.replies.length = 0;
     await handleSessionCommand({

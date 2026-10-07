@@ -25,6 +25,8 @@ export type SlashCommand =
   | { name: 'reminder'; action: 'cancel'; reminderId: string }
   | { name: 'memory'; action: 'review' | 'recent'; page: number }
   | { name: 'memory'; action: 'extract' | 'spaces' }
+  | { name: 'memory'; action: 'space-create'; nameText: string }
+  | { name: 'memory'; action: 'space-rename'; spaceId: string; nameText: string }
   | { name: 'memory'; action: 'scope'; spaceId: string }
   | { name: 'memory'; action: 'confirm' | 'reject' | 'forget'; entryId: string }
   | { name: 'memory'; action: 'correct'; entryId: string; content: string };
@@ -119,6 +121,10 @@ export function parseCommand(text: string): SlashCommand | undefined {
         ? { name: 'memory', action, spaceId: args[1] as string }
         : undefined;
     }
+    const spaceCreate = /^space\s+create\s+([\s\S]+)$/.exec(memoryMatch[1] ?? '');
+    if (spaceCreate?.[1]?.trim()) return { name: 'memory', action: 'space-create', nameText: spaceCreate[1].trim() };
+    const spaceRename = /^space\s+rename\s+([a-zA-Z0-9_-]{1,100})\s+([\s\S]+)$/.exec(memoryMatch[1] ?? '');
+    if (spaceRename?.[2]?.trim()) return { name: 'memory', action: 'space-rename', spaceId: spaceRename[1]!, nameText: spaceRename[2].trim() };
     if (action === 'review' || action === 'recent') {
       if (args.length > 2) return undefined;
       const page = args[1] === undefined ? 1 : Number(args[1]);
