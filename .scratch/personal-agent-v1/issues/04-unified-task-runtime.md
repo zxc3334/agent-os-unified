@@ -39,3 +39,9 @@
 - Regression test verifies deterministic identity independent of worker identity and rejects empty identifiers.
 - Verification: `pnpm test` (74/74), `pnpm build`, `git diff --check`.
 - Remaining: user-facing cross-thread matter selection/continuation, carryover of a concise authorized affair summary, collaboration lifecycle end-to-end test/dispatch reconciliation, and partial-result UI reconciliation. Ticket remains in progress.
+
+
+### Collaboration contract coverage
+
+- Added a collaboration runtime test that verifies stable workflow identity, trusted actor/owner propagation, and an empty personal-memory grant. Added service-level tests for dispatch registration, destination identity, workflow metadata handoff, single-use inbox consumption, and removal of pending authorization when Feishu notification fails. These tests exercise the runtime and dispatch service boundaries, but do not replace a live Feishu end-to-end dispatch/worker test.
+- Verification after the tests: `pnpm test` (101/101), `pnpm build`, `git diff --check`.
