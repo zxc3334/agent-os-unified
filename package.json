@@ -12,7 +12,8 @@
     "probe": "tsx src/probe-lark.ts",
     "build": "tsc",
     "probe:cli": "tsx src/probe-cli.ts",
-    "probe:tool": "tsx src/probe-app-tool.ts"
+    "probe:tool": "tsx src/probe-app-tool.ts",
+    "test": "tsx --test tests/*.test.ts"
   },
   "engines": {
     "node": ">=22"
