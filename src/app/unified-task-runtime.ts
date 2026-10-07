@@ -54,6 +54,36 @@ export type UnifiedTaskStatus =
   | 'failed'
   | 'cancelled';
 
+/** Deliberately content-free milestones suitable for private-safe diagnostics. */
+export type UnifiedTaskTraceStage =
+  | 'queued'
+  | 'context_prepared'
+  | 'context_unavailable'
+  | 'execution_progress'
+  | 'completed'
+  | 'failed'
+  | 'cancelled';
+
+/**
+ * A trace contains opaque identifiers and lifecycle metadata only. In
+ * particular it never contains task input, memory text, progress text, result,
+ * artifact labels/locations, or exception messages.
+ */
+export interface UnifiedTaskTraceEvent {
+  version: 1;
+  taskId: string;
+  source: 'message' | 'schedule' | 'collaboration' | 'clarification' | 'approval' | 'comment' | 'other';
+  sourceId?: string;
+  stage: UnifiedTaskTraceStage;
+  timestamp: string;
+  artifactIds: string[];
+  failureCode?: 'memory_context_unavailable' | 'execution_failed';
+}
+
+export type UnifiedTaskTraceSink = (
+  event: UnifiedTaskTraceEvent,
+) => void | Promise<void>;
+
 /** Durable, user-inspectable record for one execution attempt. */
 export interface UnifiedTask {
   id: string;
@@ -130,6 +160,8 @@ export interface UnifiedTaskRuntimeOptions<Context = unknown> {
   executor: UnifiedTaskExecutor<Context>;
   now?: () => string;
   id?: () => string;
+  /** Best-effort diagnostic sink. Sink failures never change task outcomes. */
+  trace?: UnifiedTaskTraceSink;
 }
 
 /**
@@ -176,14 +208,17 @@ export class UnifiedTaskRuntime<Context = unknown> {
     };
 
     await this.persist(task, observe);
+    await this.trace(task, 'queued');
     if (request.signal.aborted) {
       task = await this.finish(task, 'cancelled', observe);
+      await this.trace(task, 'cancelled');
       return clone(task);
     }
 
     task = { ...task, status: 'running', startedAt: this.now() };
     await this.persist(task, observe);
 
+    let phase: 'context' | 'execution' = 'context';
     try {
       const memoryContext = await this.options.memoryContext.prepare({
         actorId: task.trusted.actorId,
@@ -195,8 +230,11 @@ export class UnifiedTaskRuntime<Context = unknown> {
         ...(request.memoryQuery === undefined ? {} : { query: request.memoryQuery }),
         signal: request.signal,
       });
+      await this.trace(task, 'context_prepared');
+      phase = 'execution';
       if (request.signal.aborted) {
         task = await this.finish(task, 'cancelled', observe);
+        await this.trace(task, 'cancelled');
         return clone(task);
       }
 
@@ -208,6 +246,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
           if (task.status !== 'running' || request.signal.aborted) return;
           task = { ...task, progress, updatedAt: this.now() };
           await this.persist(task, observe);
+          await this.trace(task, 'execution_progress');
         },
       });
       assertExecution(execution);
@@ -222,6 +261,7 @@ export class UnifiedTaskRuntime<Context = unknown> {
           ? 'partially_succeeded'
           : 'succeeded';
       task = await this.finish(task, status, observe);
+      await this.trace(task, status === 'cancelled' ? 'cancelled' : 'completed');
       return clone(task);
     } catch (error) {
       const cancelled = request.signal.aborted || isAbortError(error);
@@ -229,7 +269,14 @@ export class UnifiedTaskRuntime<Context = unknown> {
         ...task,
         ...(cancelled ? {} : { error: errorMessage(error) }),
       };
+      if (!cancelled && phase === 'context') await this.trace(task, 'context_unavailable');
       task = await this.finish(task, cancelled ? 'cancelled' : 'failed', observe);
+      if (cancelled) await this.trace(task, 'cancelled');
+      else {
+        await this.trace(task, 'failed', [], phase === 'context'
+          ? 'memory_context_unavailable'
+          : 'execution_failed');
+      }
       return clone(task);
     }
   }
@@ -266,6 +313,37 @@ export class UnifiedTaskRuntime<Context = unknown> {
       observe?.(clone(snapshot));
     } catch {
       // Observers are reporting hooks; they cannot alter task execution truth.
+    }
+  }
+
+  private async trace(
+    task: UnifiedTask,
+    stage: UnifiedTaskTraceStage,
+    artifactIds: readonly string[] = task.artifacts.map(({ id }) => id),
+    failureCode?: UnifiedTaskTraceEvent['failureCode'],
+  ): Promise<void> {
+    if (!this.options.trace) return;
+    const taskId = safeIdentifier(task.id);
+    const sourceId = task.trigger.sourceId === undefined
+      ? undefined
+      : safeIdentifier(task.trigger.sourceId);
+    const event: UnifiedTaskTraceEvent = {
+      version: 1,
+      taskId: taskId ?? 'unavailable',
+      source: safeSource(task.trigger.source),
+      ...(sourceId === undefined ? {} : { sourceId }),
+      stage,
+      timestamp: this.now(),
+      artifactIds: artifactIds.flatMap((id) => {
+        const safe = safeIdentifier(id);
+        return safe === undefined ? [] : [safe];
+      }),
+      ...(failureCode === undefined ? {} : { failureCode }),
+    };
+    try {
+      await this.options.trace(clone(event));
+    } catch {
+      // Diagnostics are best effort; task state remains authoritative.
     }
   }
 }
@@ -384,4 +462,14 @@ function isAbortError(error: unknown): boolean {
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+function safeIdentifier(value: string): string | undefined {
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value) ? value : undefined;
+}
+
+function safeSource(value: UnifiedTaskSource): UnifiedTaskTraceEvent['source'] {
+  return ['message', 'schedule', 'collaboration', 'clarification', 'approval', 'comment'].includes(value)
+    ? value as UnifiedTaskTraceEvent['source']
+    : 'other';
 }

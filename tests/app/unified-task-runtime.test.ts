@@ -10,6 +10,11 @@ import {
   workflowAffairId,
   type UnifiedTask,
 } from '../../src/app/unified-task-runtime.js';
+import { runPersonalAgentReplaySuite } from '../replay/evaluator.js';
+import {
+  PERSONAL_AGENT_REPLAY_FIXTURE_VERSION,
+  PERSONAL_AGENT_REPLAY_FIXTURES,
+} from '../replay/fixtures.js';
 
 const fixedTime = '2026-10-07T12:00:00.000Z';
 
@@ -171,10 +176,80 @@ test('task records are defensively copied at the store seam', async () => {
 });
 
 
+
 test('affair identities remain stable across bot and engine changes', () => {
   assert.equal(conversationAffairId('chat-1', 'thread-2'), conversationAffairId('chat-1', 'thread-2'));
   assert.equal(conversationAffairId('chat:1', 'thread:2'), 'conversation:chat%3A1:thread%3A2');
   assert.notEqual(conversationAffairId('chat-1', 'thread-2'), conversationAffairId('chat-1', 'thread-3'));
   assert.equal(workflowAffairId('flow-1'), workflowAffairId('flow-1'));
   assert.throws(() => conversationAffairId('', 'thread'), /required/);
+});
+
+test('private-safe trace exposes lifecycle and opaque source/artifact identifiers only', async () => {
+  await withStore(async (filePath) => {
+    const trace: unknown[] = [];
+    const runtime = new UnifiedTaskRuntime({
+      store: new JsonUnifiedTaskStore(filePath),
+      id: () => 'trace-run-1',
+      now: () => fixedTime,
+      trace: (event) => { trace.push(event); },
+      memoryContext: { async prepare() { return { privateMemoryText: 'PRIVATE-MEMORY-MARKER' }; } },
+      executor: {
+        async execute({ reportProgress }) {
+          await reportProgress('PRIVATE-PROGRESS-MARKER');
+          return {
+            outcome: 'succeeded',
+            result: { privateResult: 'PRIVATE-RESULT-MARKER' },
+            artifacts: [{ id: 'artifact-resume-v2', kind: 'markdown', label: 'PRIVATE-ARTIFACT-LABEL', location: '/private/PRIVATE-ARTIFACT-PATH' }],
+          };
+        },
+      },
+    });
+    const task = await runtime.run({
+      ...request(), input: { text: 'PRIVATE-INPUT-MARKER' },
+      trigger: { source: 'message', sourceId: 'message-opaque-42', occurredAt: fixedTime },
+    });
+    assert.equal(task.status, 'succeeded');
+    assert.deepEqual((trace as Array<{ stage: string }>).map(({ stage }) => stage), ['queued', 'context_prepared', 'execution_progress', 'completed']);
+    const traceJson = JSON.stringify(trace);
+    for (const secret of ['PRIVATE-INPUT-MARKER', 'PRIVATE-MEMORY-MARKER', 'PRIVATE-PROGRESS-MARKER', 'PRIVATE-RESULT-MARKER', 'PRIVATE-ARTIFACT-LABEL', 'PRIVATE-ARTIFACT-PATH']) {
+      assert.equal(traceJson.includes(secret), false);
+    }
+    assert.equal(traceJson.includes('message-opaque-42'), true);
+    assert.equal(traceJson.includes('artifact-resume-v2'), true);
+  });
+});
+
+test('trace sink failure is best effort and context failure is described without its message', async () => {
+  await withStore(async (filePath) => {
+    const trace: Array<{ stage: string; failureCode?: string }> = [];
+    const runtime = new UnifiedTaskRuntime({
+      store: new JsonUnifiedTaskStore(filePath), id: () => 'trace-context-failed',
+      trace(event) { trace.push(event); if (event.stage === 'queued') throw new Error('trace sink unavailable'); },
+      memoryContext: { async prepare() { throw new Error('PRIVATE-CONTEXT-ERROR-MARKER'); } },
+      executor: { async execute() { throw new Error('executor must not run'); } },
+    });
+    const task = await runtime.run(request());
+    assert.equal(task.status, 'failed');
+    assert.deepEqual(trace.map(({ stage }) => stage), ['queued', 'context_unavailable', 'failed']);
+    assert.equal(trace[2]?.failureCode, 'memory_context_unavailable');
+    assert.equal(JSON.stringify(trace).includes('PRIVATE-CONTEXT-ERROR-MARKER'), false);
+
+    const successful = new UnifiedTaskRuntime({
+      store: new JsonUnifiedTaskStore(filePath), id: () => 'trace-failed-but-task-succeeded',
+      trace() { throw new Error('diagnostics must not fail a task'); },
+      memoryContext: { async prepare() { return null; } },
+      executor: { async execute() { return { outcome: 'succeeded', result: 'saved result', artifacts: [] }; } },
+    });
+    assert.equal((await successful.run(request())).status, 'succeeded');
+  });
+});
+
+test('versioned synthetic replay cases assert deterministic adapter and permission behavior', async () => {
+  assert.equal(PERSONAL_AGENT_REPLAY_FIXTURE_VERSION, 1);
+  assert.equal(PERSONAL_AGENT_REPLAY_FIXTURES.length, 25);
+  const results = await runPersonalAgentReplaySuite();
+  assert.equal(results.length, PERSONAL_AGENT_REPLAY_FIXTURES.length);
+  assert.ok(results.every((result) => result.passed && result.fixtureVersion === 1));
+});
 });
