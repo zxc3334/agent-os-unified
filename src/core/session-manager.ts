@@ -95,7 +95,14 @@ export class SessionManager {
     const threadId = topicIdOf(message);
     const key = sessionKey(botId, message.chatId, threadId);
     const existing = this.sessions.get(key);
-    if (existing) return { session: existing, isNew: false };
+    if (existing) {
+      if (existing.cliId === cliId) return { session: existing, isNew: false };
+      if (existing.status === 'active') {
+        throw new Error('当前事项仍在执行，不能切换执行引擎');
+      }
+      const switched = await this.switchCliAdapter(existing, cliId, workspaceDir);
+      return { session: switched, isNew: false };
+    }
 
     const now = this.now().toISOString();
     const session: Session = {
@@ -192,6 +199,32 @@ export class SessionManager {
     const updated: Session = {
       ...rest,
       workspaceDir,
+      updatedAt: this.now().toISOString(),
+    };
+    const key = sessionKey(updated.botId, updated.chatId, updated.threadId);
+    this.sessions.set(key, updated);
+    try {
+      await this.persist();
+    } catch (error) {
+      if (this.sessions.get(key) === updated) this.sessions.set(key, current);
+      throw error;
+    }
+    return updated;
+  }
+
+
+  private async switchCliAdapter(
+    current: Session,
+    cliId: CliId,
+    workspaceDir: string,
+  ): Promise<Session> {
+    const updated: Session = {
+      ...current,
+      cliId,
+      workspaceDir,
+      // Native histories are engine-specific. Keep the Agent OS session/affair,
+      // but never pass an old engine's opaque session identifier to another CLI.
+      cliSessionId: undefined,
       updatedAt: this.now().toISOString(),
     };
     const key = sessionKey(updated.botId, updated.chatId, updated.threadId);
