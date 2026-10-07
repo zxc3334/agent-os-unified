@@ -31,6 +31,9 @@ import { PersonalTaskMemoryProvider } from './app/personal-task-memory.js';
 import { PersonalMemoryToolBridge } from './app/personal-memory-bridge.js';
 import { JsonPersonalSkillRegistry } from './core/personal-skills.js';
 import { JsonCareerPreparation } from './core/career-preparation.js';
+import { JsonBlogAssociations } from './core/blog-associations.js';
+import { BlogEntryService } from './app/blog-entry-service.js';
+import { dailyRecordSearchProvider, personalMemorySearchProvider, textMaterialSearchProvider } from './core/blog-source-retriever.js';
 import { JsonTextMaterialLibrary } from './core/text-materials.js';
 import { CareerReviewSchedulerAdapter } from './core/review-scheduler.js';
 import { JsonDailyRecordsReminders } from './core/daily-records.js';
@@ -159,6 +162,14 @@ const textMaterials = configuredOwnerOpenId
   : undefined;
 const careerReviewScheduler = new CareerReviewSchedulerAdapter(careerPreparation);
 const dailyRecords = new JsonDailyRecordsReminders(join(privateDataRoot, 'daily-records.json'));
+const blogAssociations = new JsonBlogAssociations(join(privateDataRoot, 'blog-associations.json'));
+const blogEntryService = personalMemoryStore
+  ? new BlogEntryService(blogAssociations, {
+      memories: personalMemorySearchProvider(personalMemoryStore),
+      dailyRecords: dailyRecordSearchProvider(dailyRecords),
+      materials: textMaterials ? textMaterialSearchProvider(textMaterials) : { async search() { return []; } },
+    })
+  : undefined;
 const personalReminderScheduler = new PersonalReminderScheduler({
   store: dailyRecords,
   senderFor: (botId) => botRuntimes.get(botId)?.bot,
@@ -454,6 +465,7 @@ async function startConfiguredBot(
         careerPreparation,
         careerReviewScheduler,
         textMaterials,
+        blogEntryService,
         dailyRecords,
         personalReminderScheduler,
       });

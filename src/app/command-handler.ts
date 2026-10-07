@@ -24,6 +24,7 @@ import { PERSONAL_SKILLS, type JsonPersonalSkillRegistry } from "../core/persona
 import type { JsonCareerPreparation } from "../core/career-preparation.js";
 import type { CareerReviewSchedulerAdapter } from "../core/review-scheduler.js";
 import type { JsonTextMaterialLibrary } from "../core/text-materials.js";
+import type { BlogEntryService } from "./blog-entry-service.js";
 import type { JsonDailyRecordsReminders } from "../core/daily-records.js";
 import { resolveRelativeDue } from "../core/daily-records.js";
 import type { PersonalReminderScheduler } from "./personal-reminder-scheduler.js";
@@ -49,6 +50,7 @@ export async function handleSessionCommand(options: {
   careerPreparation?: JsonCareerPreparation;
   careerReviewScheduler?: CareerReviewSchedulerAdapter;
   textMaterials?: JsonTextMaterialLibrary;
+  blogEntryService?: BlogEntryService;
   dailyRecords?: JsonDailyRecordsReminders;
   personalReminderScheduler?: PersonalReminderScheduler;
 }): Promise<CommandOutcome> {
@@ -71,6 +73,7 @@ export async function handleSessionCommand(options: {
     careerPreparation,
     careerReviewScheduler,
     textMaterials,
+    blogEntryService,
     dailyRecords,
     personalReminderScheduler,
   } = options;
@@ -221,6 +224,51 @@ export async function handleSessionCommand(options: {
       }
     } catch {
       await bot.reply(msg.messageId, "事项轨迹暂时不可用；未能读取本地任务记录。", hasThread);
+    }
+    return "handled";
+  }
+
+  if (command?.name === "blog") {
+    if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId || msg.chatType !== "p2p") {
+      await bot.reply(msg.messageId, "博客素材与关联仅限所有者在私聊中使用。", hasThread);
+      return "handled";
+    }
+    if (!blogEntryService || !personalMemoryStore) {
+      await bot.reply(msg.messageId, "博客关联暂不可用；请检查本地记忆与资料库配置。", hasThread);
+      return "handled";
+    }
+    try {
+      const spaces = await personalMemoryStore.listSpaces();
+      const authorizedSpaceIds = session.memorySpaceIds === undefined
+        ? spaces.map((space) => space.id)
+        : spaces.map((space) => space.id).filter((id) => session.memorySpaceIds?.includes(id));
+      const safe = (value: string, max = 500) => Array.from(value.replace(/[\r\n\t\u0000-\u001f\u007f]/g, " ")).slice(0, max).join("");
+      if (command.action === "search") {
+        const result = await blogEntryService.search(command.query, authorizedSpaceIds);
+        const lines = result.sources.slice(0, 6).map((source) => {
+          const place = [source.provenance.date, source.provenance.location].filter(Boolean).join(" · ");
+          return `${source.reference.kind} ${source.reference.id}（${source.reference.spaceId}${place ? `；${place}` : ""}）：${safe(source.excerpt)}`;
+        });
+        const unavailable = result.unavailableKinds.length ? `\n部分来源暂不可用：${result.unavailableKinds.join("、")}` : "";
+        await bot.reply(msg.messageId, `${lines.length ? `授权范围内找到 ${lines.length} 条候选来源：\n${lines.join("\n")}` : "授权范围内没有找到相关来源。"}${unavailable}\n候选只供参考，不会自动拼成你的观点。`, hasThread);
+      } else if (command.action === "propose") {
+        const result = await blogEntryService.propose({
+          actorId: trustedOwnerOpenId, operationId: `blog:${msg.messageId}`, createdAt: msg.receivedAt,
+          query: command.query, intendedUse: command.intendedUse, authorizedSpaceIds,
+        });
+        if (!result.proposalId) {
+          const found = result.sources.map((item) => `${item.reference.kind} ${item.reference.id}（${item.reference.spaceId}）`).join("\n");
+          await bot.reply(msg.messageId, `${result.sources.length ? `目前只找到 ${result.sources.length} 条来源，至少需要两条才能建立候选关联：\n${found}` : "目前没有找到足够的授权来源；没有建立关联。"}`, hasThread);
+        } else {
+          const refs = result.sources.map((item) => `${item.reference.kind} ${item.reference.id}（${item.reference.spaceId}）：${safe(item.excerpt, 240)}`).join("\n");
+          await bot.reply(msg.messageId, `候选关联 [${result.proposalId}] 已保存，尚未接受为你的观点。\n${refs}\n请判断：/blog decide ${result.proposalId} accept|reject|none`, hasThread);
+        }
+      } else {
+        const decided = blogEntryService.decide(command.proposalId, trustedOwnerOpenId, command.decision, msg.receivedAt);
+        await bot.reply(msg.messageId, decided ? `候选关联已记录为 ${command.decision}；原始记忆与资料未修改。` : "没有找到属于你的关联候选，或该候选已无法更新。", hasThread);
+      }
+    } catch {
+      await bot.reply(msg.messageId, "博客关联操作暂时失败；未能确认已保存任何结果。", hasThread);
     }
     return "handled";
   }
@@ -456,6 +504,7 @@ export async function handleSessionCommand(options: {
         "/schedule <需求> 创建定时任务",
         "/schedules 查看定时任务",
         "/topics 扫描有哪些素材够写一篇博客了",
+        "/blog search <关键词> 检索授权素材；/blog propose <关键词> :: <用途> 创建待确认关联；/blog decide <ID> accept|reject|none",
         "/memory [review|recent] [页码] 查看待确认或最近记忆（每页最多 5 条）",
         "/memory spaces 查看个人记忆空间；/memory scope <空间ID|all> 设置本事项的记忆范围",
         "/memory extract 从当前项目待处理对话中恢复并执行学习记忆提取",

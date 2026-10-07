@@ -22,7 +22,14 @@
 - Public draft creation fails closed until every cited proposal source has an explicit per-source public-use authorization. Drafts cannot cite sources outside an accepted proposal.
 - Tests use temporary real storage and cover unauthorized spaces, idempotent references, source immutability, no-connection, stance preservation and denied/authorized public-use paths.
 - Verification after integration: `pnpm test` (73/73), `pnpm build`, `git diff --check`.
-- This is only the domain core. There is no Feishu/ordinary-task command integration, no live search over the authoritative personal/daily stores, no model-driven association generation, and no material-revocation invalidation. The caller must still establish trusted actor/authorized spaces. Ticket remains in progress.
+- Earlier state: only the domain core existed; there was no Feishu/ordinary-task command integration or live search over the authoritative stores.
+
+### Owner command integration
+
+- Added `src/app/blog-entry-service.ts` and owner-only `/blog search <query>`, `/blog propose <query> :: <intended use>`, and `/blog decide <ID> accept|reject|none` commands. The handler derives authorized spaces from the current matter allowlist and enforces trusted owner + private chat before search, proposal, or decision. Results are bounded, carry source IDs/space IDs and available provenance, and explicitly remain candidates rather than user viewpoints. Proposals require at least two distinct source IDs; duplicate IDs across providers are de-duplicated. Decisions are actor-bound and never mutate source records. Provider failures are reported by kind without exposing backend errors.
+- Tests cover parser boundaries, owner/group access, matter scope, search/proposal/decision behavior, insufficient source count, provider failure and actor-bound decisions.
+- Verification after this integration: `pnpm test` (98/98), `pnpm build`, `git diff --check`.
+- Remaining: model-generated proposals/outlines/drafts, resolving already-persisted proposals when sources are revoked, and richer workflow for drafting. Ticket remains in progress.
 
 
 ### 授权检索更新

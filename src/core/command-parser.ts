@@ -22,6 +22,9 @@ export type SlashCommand =
   | { name: 'career'; action: 'material-revoke'; materialId: string }
   | { name: 'task'; action: 'recent' }
   | { name: 'task'; action: 'trace'; taskId: string }
+  | { name: 'blog'; action: 'search'; query: string }
+  | { name: 'blog'; action: 'propose'; query: string; intendedUse: string }
+  | { name: 'blog'; action: 'decide'; proposalId: string; decision: 'accepted' | 'rejected' | 'no-connection' }
   | { name: 'daily'; action: 'list' }
   | { name: 'daily'; action: 'add'; kind: 'daily' | 'reading' | 'exploration'; content: string; authorView?: string; userView?: string }
   | { name: 'daily'; action: 'recap'; from: string; through: string }
@@ -45,6 +48,7 @@ const TOPICS_RE = /^(?:@.+?\s+)?\/topics\s*$/;
 const SKILLS_RE = /^(?:@.+?\s+)?\/skills(?:\s+([\s\S]+?))?\s*$/;
 const CAREER_RE = /^(?:@.+?\s+)?\/career(?:\s+([\s\S]+?))?\s*$/;
 const TASK_RE = /^(?:@.+?\s+)?\/task(?:\s+([\s\S]+?))?\s*$/;
+const BLOG_RE = /^(?:@.+?\s+)?\/blog(?:\s+([\s\S]+?))?\s*$/;
 const DAILY_RE = /^(?:@.+?\s+)?\/daily(?:\s+([\s\S]+?))?\s*$/;
 const REMINDER_RE = /^(?:@.+?\s+)?\/reminder(?:\s+([\s\S]+?))?\s*$/;
 const MEMORY_RE = /^(?:@.+?\s+)?\/memory(?:\s+([\s\S]+?))?\s*$/;
@@ -92,6 +96,17 @@ export function parseCommand(text: string): SlashCommand | undefined {
     if (add?.[1]?.trim() && add[2]?.trim()) return { name: 'reminder', action: 'add', due: add[1]!.trim(), content: add[2]!.trim() };
     const edit = /^edit\s+([a-zA-Z0-9_-]{1,100})\s+([\s\S]+?)\s*::\s*([\s\S]+)$/.exec(args);
     if (edit?.[2]?.trim() && edit[3]?.trim()) return { name: 'reminder', action: 'edit', reminderId: edit[1]!, due: edit[2]!.trim(), content: edit[3]!.trim() };
+    return undefined;
+  }
+  const blogMatch = BLOG_RE.exec(value);
+  if (blogMatch) {
+    const args = blogMatch[1]?.trim() ?? '';
+    const search = /^search\s+([\s\S]+)$/.exec(args);
+    if (search?.[1]?.trim()) return { name: 'blog', action: 'search', query: search[1].trim() };
+    const propose = /^propose\s+([\s\S]+?)\s*::\s*([\s\S]+)$/.exec(args);
+    if (propose?.[1]?.trim() && propose[2]?.trim()) return { name: 'blog', action: 'propose', query: propose[1].trim(), intendedUse: propose[2].trim() };
+    const decide = /^decide\s+([A-Za-z0-9][A-Za-z0-9_-]{0,99})\s+(accept|reject|none)$/.exec(args);
+    if (decide) return { name: 'blog', action: 'decide', proposalId: decide[1]!, decision: decide[2] === 'accept' ? 'accepted' : decide[2] === 'reject' ? 'rejected' : 'no-connection' };
     return undefined;
   }
   const taskMatch = TASK_RE.exec(value);
