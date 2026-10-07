@@ -1,6 +1,7 @@
 # 统一任务执行与事项上下文
 
-- Status: blocked: 01-memory-substrate, 02-extraction-recovery
+- Status: in-progress
+- Blocked by: 02-extraction-recovery
 - Blocked by: 01-memory-substrate, 02-extraction-recovery
 - Milestone: B
 - Spec: [spec.md](../spec.md)
@@ -14,3 +15,10 @@
 - 通过同一任务测试入口覆盖各触发源；bot/引擎切换保留事项摘要和授权记忆；取消/失败/部分成功状态可观察；事项切换不串 native session。
 - 为本票契约补单元/集成测试；通过公开行为验证，不以内部函数调用次数为验收。
 - 完成后更新实现与验证说明；不触碰无关用户数据、生产配置或既有工作区。
+
+## Implementation status
+
+- Added `src/app/unified-task-runtime.ts`: replaceable memory-context and execution adapters, trusted identity/authorized-space propagation, affair and source-time context, persisted lifecycle/progress/result/artifacts, cancellation, partial success, and failure states. JSON storage is atomic and inspectable.
+- Tests use a real temporary directory and verify persistence after reopening, trusted-scope handling, progress/artifacts, defensive copies, and distinguishable cancellation/failure/partial outcomes.
+- Verification: `pnpm test` (26/26), `pnpm build`, and `git diff --check` pass.
+- Remaining: wire the runtime through existing message, schedule, collaboration, approval/clarification, card-action, and document-comment entry points; preserve per-affair native sessions and summaries. These production adapters are not yet implemented, so this ticket remains in progress.

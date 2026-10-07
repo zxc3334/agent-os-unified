@@ -1,0 +1,360 @@
+import { randomUUID } from 'node:crypto';
+import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
+import { dirname } from 'node:path';
+
+/** Trigger kinds intentionally describe transport/workflow, not authority. */
+export type UnifiedTaskSource =
+  | 'message'
+  | 'schedule'
+  | 'collaboration'
+  | 'clarification'
+  | 'approval'
+  | 'comment'
+  | (string & {});
+
+export interface TrustedTaskIdentity {
+  /** Identity authenticated by the caller; never populated from model output. */
+  actorId: string;
+  /** Personal-memory owner established by the trusted caller. */
+  ownerId: string;
+}
+
+export interface UnifiedTaskTrigger {
+  source: UnifiedTaskSource;
+  sourceId?: string;
+  /** Original event time, not the time this runtime happens to process it. */
+  occurredAt: string;
+}
+
+export interface TaskArtifact {
+  id: string;
+  kind: string;
+  label: string;
+  /** Adapter-owned location/URI; the runtime does not interpret it. */
+  location?: string;
+}
+
+export type UnifiedTaskStatus =
+  | 'queued'
+  | 'running'
+  | 'succeeded'
+  | 'partially_succeeded'
+  | 'failed'
+  | 'cancelled';
+
+/** Durable, user-inspectable record for one execution attempt. */
+export interface UnifiedTask {
+  id: string;
+  trusted: TrustedTaskIdentity;
+  affairId: string;
+  trigger: UnifiedTaskTrigger;
+  authorizedMemorySpaceIds: string[];
+  input: unknown;
+  status: UnifiedTaskStatus;
+  createdAt: string;
+  updatedAt: string;
+  startedAt?: string;
+  completedAt?: string;
+  progress?: string;
+  result?: unknown;
+  artifacts: TaskArtifact[];
+  error?: string;
+}
+
+export interface UnifiedTaskStore {
+  get(id: string): Promise<UnifiedTask | undefined>;
+  list(affairId?: string): Promise<UnifiedTask[]>;
+  save(task: UnifiedTask): Promise<void>;
+}
+
+export interface PrepareTaskMemoryContext {
+  actorId: string;
+  ownerId: string;
+  affairId: string;
+  trigger: UnifiedTaskTrigger;
+  authorizedMemorySpaceIds: readonly string[];
+  input: unknown;
+  signal: AbortSignal;
+}
+
+/** The provider must honor only the explicitly supplied authorized spaces. */
+export interface TaskMemoryContextProvider<Context = unknown> {
+  prepare(request: PrepareTaskMemoryContext): Promise<Context>;
+}
+
+export interface ExecuteUnifiedTask<Context = unknown> {
+  task: Readonly<UnifiedTask>;
+  memoryContext: Context;
+  signal: AbortSignal;
+  reportProgress(progress: string): Promise<void>;
+}
+
+export interface UnifiedTaskExecution {
+  outcome: 'succeeded' | 'partial';
+  result: unknown;
+  artifacts: TaskArtifact[];
+}
+
+export interface UnifiedTaskExecutor<Context = unknown> {
+  execute(request: ExecuteUnifiedTask<Context>): Promise<UnifiedTaskExecution>;
+}
+
+export interface RunUnifiedTaskInput {
+  trusted: TrustedTaskIdentity;
+  affairId: string;
+  trigger: UnifiedTaskTrigger;
+  /** Authorization is supplied by trusted application code, never by model output. */
+  authorizedMemorySpaceIds: readonly string[];
+  input: unknown;
+  signal: AbortSignal;
+}
+
+export interface UnifiedTaskRuntimeOptions<Context = unknown> {
+  store: UnifiedTaskStore;
+  memoryContext: TaskMemoryContextProvider<Context>;
+  executor: UnifiedTaskExecutor<Context>;
+  now?: () => string;
+  id?: () => string;
+}
+
+/**
+ * Deep execution seam shared by message, schedule, collaboration and continuation
+ * callers. It owns task lifecycle, authorization propagation, cancellation and
+ * durable outcome reporting; transport and model/CLI details stay in adapters.
+ *
+ * Integration remains intentionally pending: Lark message handling in
+ * `command-handler.ts`, scheduled dispatch/runs, collaboration and approval or
+ * clarification continuations, card actions, and product comments must each
+ * map their authenticated identity, affair, original source time, authorized
+ * memory spaces, input, and AbortSignal into this seam. Their existing delivery
+ * and native-session behavior is not changed here. In particular, callers must
+ * derive authority before entering this module; executor/model output is only
+ * stored as result data and is never re-read as identity or permission.
+ *
+ * A run resolves with its final record, including failed/cancelled outcomes.
+ * Storage and adapter setup failures are not disguised as task outcomes.
+ */
+export class UnifiedTaskRuntime<Context = unknown> {
+  private readonly now: () => string;
+  private readonly id: () => string;
+
+  constructor(private readonly options: UnifiedTaskRuntimeOptions<Context>) {
+    this.now = options.now ?? (() => new Date().toISOString());
+    this.id = options.id ?? randomUUID;
+  }
+
+  async run(
+    request: RunUnifiedTaskInput,
+    observe?: (task: UnifiedTask) => void,
+  ): Promise<UnifiedTask> {
+    validateRequest(request);
+    const timestamp = this.now();
+    let task: UnifiedTask = {
+      id: this.id(),
+      trusted: { ...request.trusted },
+      affairId: request.affairId,
+      trigger: { ...request.trigger },
+      authorizedMemorySpaceIds: [...new Set(request.authorizedMemorySpaceIds)],
+      input: clone(request.input),
+      status: 'queued',
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      artifacts: [],
+    };
+
+    await this.persist(task, observe);
+    if (request.signal.aborted) {
+      task = await this.finish(task, 'cancelled', observe);
+      return clone(task);
+    }
+
+    task = { ...task, status: 'running', startedAt: this.now() };
+    await this.persist(task, observe);
+
+    try {
+      const memoryContext = await this.options.memoryContext.prepare({
+        actorId: task.trusted.actorId,
+        ownerId: task.trusted.ownerId,
+        affairId: task.affairId,
+        trigger: clone(task.trigger),
+        authorizedMemorySpaceIds: [...task.authorizedMemorySpaceIds],
+        input: clone(task.input),
+        signal: request.signal,
+      });
+      if (request.signal.aborted) {
+        task = await this.finish(task, 'cancelled', observe);
+        return clone(task);
+      }
+
+      const execution = await this.options.executor.execute({
+        task: clone(task),
+        memoryContext,
+        signal: request.signal,
+        reportProgress: async (progress) => {
+          if (task.status !== 'running' || request.signal.aborted) return;
+          task = { ...task, progress, updatedAt: this.now() };
+          await this.persist(task, observe);
+        },
+      });
+      assertExecution(execution);
+      task = {
+        ...task,
+        result: clone(execution.result),
+        artifacts: clone(execution.artifacts),
+      };
+      const status: UnifiedTaskStatus = request.signal.aborted
+        ? 'cancelled'
+        : execution.outcome === 'partial'
+          ? 'partially_succeeded'
+          : 'succeeded';
+      task = await this.finish(task, status, observe);
+      return clone(task);
+    } catch (error) {
+      const cancelled = request.signal.aborted || isAbortError(error);
+      task = {
+        ...task,
+        ...(cancelled ? {} : { error: errorMessage(error) }),
+      };
+      task = await this.finish(task, cancelled ? 'cancelled' : 'failed', observe);
+      return clone(task);
+    }
+  }
+
+  get(id: string): Promise<UnifiedTask | undefined> {
+    return this.options.store.get(id);
+  }
+
+  list(affairId?: string): Promise<UnifiedTask[]> {
+    return this.options.store.list(affairId);
+  }
+
+  private async finish(
+    task: UnifiedTask,
+    status: Extract<UnifiedTaskStatus, 'succeeded' | 'partially_succeeded' | 'failed' | 'cancelled'>,
+    observe?: (task: UnifiedTask) => void,
+  ): Promise<UnifiedTask> {
+    const completed = {
+      ...task,
+      status,
+      completedAt: this.now(),
+    } satisfies UnifiedTask;
+    await this.persist(completed, observe);
+    return completed;
+  }
+
+  private async persist(
+    task: UnifiedTask,
+    observe?: (task: UnifiedTask) => void,
+  ): Promise<void> {
+    const snapshot = clone(task);
+    await this.options.store.save(snapshot);
+    try {
+      observe?.(clone(snapshot));
+    } catch {
+      // Observers are reporting hooks; they cannot alter task execution truth.
+    }
+  }
+}
+
+/** JSON-backed local adapter. Writes are atomic and serialized per instance. */
+export class JsonUnifiedTaskStore implements UnifiedTaskStore {
+  private writeQueue: Promise<void> = Promise.resolve();
+
+  constructor(private readonly filePath: string) {}
+
+  async get(id: string): Promise<UnifiedTask | undefined> {
+    const tasks = await this.load();
+    const found = tasks.find((task) => task.id === id);
+    return found ? clone(found) : undefined;
+  }
+
+  async list(affairId?: string): Promise<UnifiedTask[]> {
+    const tasks = await this.load();
+    return tasks
+      .filter((task) => affairId === undefined || task.affairId === affairId)
+      .map(clone);
+  }
+
+  save(task: UnifiedTask): Promise<void> {
+    const snapshot = clone(task);
+    const write = async () => {
+      const tasks = await this.load();
+      const index = tasks.findIndex((current) => current.id === snapshot.id);
+      if (index === -1) tasks.push(snapshot);
+      else tasks[index] = snapshot;
+      await mkdir(dirname(this.filePath), { recursive: true });
+      const temporaryPath = `${this.filePath}.${randomUUID()}.tmp`;
+      await writeFile(temporaryPath, `${JSON.stringify(tasks, null, 2)}\n`, 'utf8');
+      await rename(temporaryPath, this.filePath);
+    };
+    this.writeQueue = this.writeQueue.then(write, write);
+    return this.writeQueue;
+  }
+
+  private async load(): Promise<UnifiedTask[]> {
+    let content: string;
+    try {
+      content = await readFile(this.filePath, 'utf8');
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw error;
+    }
+    const parsed: unknown = JSON.parse(content);
+    if (!Array.isArray(parsed)) throw new Error(`任务文件格式错误: ${this.filePath}`);
+    return parsed.map(parseTask);
+  }
+}
+
+function validateRequest(request: RunUnifiedTaskInput): void {
+  if (!request.trusted.actorId.trim() || !request.trusted.ownerId.trim()) {
+    throw new Error('trusted actorId and ownerId are required');
+  }
+  if (!request.affairId.trim()) throw new Error('affairId is required');
+  if (!request.trigger.source.trim() || !request.trigger.occurredAt.trim()) {
+    throw new Error('trigger source and occurredAt are required');
+  }
+  if (request.authorizedMemorySpaceIds.some((id) => !id.trim())) {
+    throw new Error('authorized memory space IDs must be non-empty');
+  }
+}
+
+function assertExecution(value: UnifiedTaskExecution): void {
+  if (!value || !['succeeded', 'partial'].includes(value.outcome) || !Array.isArray(value.artifacts)) {
+    throw new Error('executor returned an invalid task outcome');
+  }
+  for (const artifact of value.artifacts) {
+    if (!artifact || !artifact.id || !artifact.kind || !artifact.label) {
+      throw new Error('executor returned an invalid artifact');
+    }
+  }
+}
+
+function parseTask(value: unknown): UnifiedTask {
+  if (!value || typeof value !== 'object') throw new Error('任务文件包含无效记录');
+  const task = value as UnifiedTask;
+  const statuses: UnifiedTaskStatus[] = [
+    'queued', 'running', 'succeeded', 'partially_succeeded', 'failed', 'cancelled',
+  ];
+  if (
+    typeof task.id !== 'string' ||
+    typeof task.affairId !== 'string' ||
+    !statuses.includes(task.status) ||
+    !Array.isArray(task.authorizedMemorySpaceIds) ||
+    !Array.isArray(task.artifacts)
+  ) {
+    throw new Error('任务文件包含无效记录');
+  }
+  return clone(task);
+}
+
+function clone<T>(value: T): T {
+  return structuredClone(value);
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
