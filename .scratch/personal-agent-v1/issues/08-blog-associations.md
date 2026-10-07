@@ -38,4 +38,4 @@
 
 - Follow-up: added an owner-private `/blog propose <topic>` flow through the replaceable `BlogWritingModel` seam, plus `/blog draft`, per-source `/blog authorize`, and explicit `/blog decide` handling. The existing `/blog propose <query> :: <intended use>` command remains compatible. Draft generation enforces source activity, provenance/citation allowlists, stance separation, and explicit authorization for public use.
 - The runtime wires retrieval providers into the workflow but intentionally does not configure a production model adapter. Until one is supplied, proposals/drafts report model unavailability rather than fabricating output. This is a remaining acceptance boundary, so the ticket stays in progress.
-- Verification pending integration: blog workflow and private command-entry tests have been added; full suite/build will be recorded after merge resolution.
+- Verification: the integrated branch passes `pnpm test` (151/151), `pnpm build`, and `git diff --check`. Tests cover model-generated proposals/drafts through a replaceable adapter, owner-private command entry, public-use authorization, source allowlists, and non-copying/stance safeguards.
