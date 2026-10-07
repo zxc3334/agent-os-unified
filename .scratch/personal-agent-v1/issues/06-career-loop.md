@@ -51,3 +51,8 @@
 - Follow-up: career task preparation now retrieves up to three matching active project/personal memories from the current matter's explicit space allow-list, alongside up to three authorized line-cited materials. Memory IDs, versions, source message IDs, and space are included; retrieved references are explicitly not confirmed resume evidence. A test also injects out-of-scope search adapters and verifies the career context still excludes their results.
 - Verification after authorized project-memory context integration: `pnpm test` (125/125), `pnpm build`, `git diff --check`.
 - Remaining: automatic private review delivery; broader natural-language evidence capture and direct project-record lookup beyond matching memories/materials; feedback persistence when no approved resume exists or user consents later; and live Feishu end-to-end validation. Ticket remains in progress.
+
+
+- Follow-up: explicit owner-authorized mock-interview feedback can now be persisted even when there is no approved resume. Such feedback remains a reviewable `practice-feedback` learning record and is not attached to a fabricated resume version or converted into evidence. When an approved resume exists, the trusted bridge still binds the feedback to that version. Tests cover persistence/reopen without a resume, optional interview linkage, owner authorization, and separation from evidence.
+- Verification: `pnpm test` (131/131), `pnpm build`, `git diff --check`.
+- Remaining: automatic private delivery of due review items, broader direct project-record/evidence retrieval beyond current authorized memories/materials, follow-up consent workflow, and live Feishu end-to-end validation. Ticket remains in progress.

@@ -86,6 +86,21 @@ test('mock-interview weaknesses remain reviewable learning records, not confirme
   });
 });
 
+test('practice feedback can be retained without binding it to an approved resume', async () => {
+  await withStore(async (filePath) => {
+    const career = new JsonCareerPreparation(filePath, () => new Date('2026-10-07T12:00:00.000Z'));
+    const result = await career.recordMockInterview({
+      feedback: [{ summary: 'Good structure.', weakPoint: 'Explain the tradeoff.', source: { kind: 'mock-interview', id: 'unbound-session' } }],
+    });
+    assert.equal(result.interview.resumeVersionId, undefined);
+    assert.equal(result.learningRecords[0]?.resumeVersionId, undefined);
+    assert.equal(result.learningRecords[0]?.assessmentType, 'practice-feedback');
+    assert.equal((await career.listEvidence()).length, 0);
+    const reopened = new JsonCareerPreparation(filePath);
+    assert.equal((await reopened.listLearningRecords())[0]?.source.id, 'unbound-session');
+  });
+});
+
 test('learning review rejects scores outside the five-point scale without changing progress', async () => {
   await withStore(async (filePath) => {
     const career = new JsonCareerPreparation(filePath);

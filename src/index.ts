@@ -625,12 +625,11 @@ async function startConfiguredBot(
         && msg.senderOpenId === configuredOwnerOpenId
         && await personalSkills.isSelectedFor('career-interview', taskText)
         && explicitlyRequestsCareerFeedbackSave(taskText)
-        ? await careerPreparation.getActiveResumeVersion().then((resume) => resume
-            ? careerFeedbackBridge.issue({
-                actorId: msg.senderOpenId, ownerId: configuredOwnerOpenId!, sourceId: msg.messageId,
-                receivedAt: msg.receivedAt, resumeVersionId: resume.id,
-              })
-            : undefined)
+        ? await careerPreparation.getActiveResumeVersion().then((resume) =>
+            careerFeedbackBridge.issue({
+              actorId: msg.senderOpenId, ownerId: configuredOwnerOpenId!, sourceId: msg.messageId,
+              receivedAt: msg.receivedAt, ...(resume ? { resumeVersionId: resume.id } : {}),
+            }))
         : undefined;
       const reminderInvocation = dailyReminderBridge && configuredOwnerOpenId
         && msg.chatType === 'p2p'

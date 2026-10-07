@@ -9,7 +9,7 @@ export interface TrustedCareerFeedbackInvocation {
   ownerId: string;
   sourceId: string;
   receivedAt: string;
-  resumeVersionId: string;
+  resumeVersionId?: string;
 }
 interface Invocation extends TrustedCareerFeedbackInvocation { token: string; consumed: boolean }
 
@@ -63,7 +63,7 @@ export class CareerFeedbackToolBridge {
       const parsed = SaveCareerInterviewFeedbackSchema.safeParse(input);
       if (!parsed.success) return send(response, 400, { error: 'Invalid career feedback', issues: parsed.error.issues });
       const result = await this.career.recordMockInterview({
-        resumeVersionId: invocation.resumeVersionId,
+        ...(invocation.resumeVersionId ? { resumeVersionId: invocation.resumeVersionId } : {}),
         feedback: [{
           summary: parsed.data.summary,
           weakPoint: parsed.data.weakPoint,
@@ -76,6 +76,7 @@ export class CareerFeedbackToolBridge {
       return send(response, 201, {
         status: 'saved', interviewId: result.interview.id, learningRecordId: record.id,
         reviewStatus: record.reviewStatus, assessmentType: record.assessmentType,
+        ...(record.resumeVersionId ? { resumeVersionId: record.resumeVersionId } : {}),
       });
     } catch (error) {
       invocation.consumed = false;

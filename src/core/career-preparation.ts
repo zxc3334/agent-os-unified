@@ -56,7 +56,7 @@ export interface CareerLearningRecord {
   summary: string;
   weakPoint: string;
   source: CareerSourceRef;
-  resumeVersionId: string;
+  resumeVersionId?: string;
   createdAt: string;
   latestScore?: number;
   reviewRounds: number;
@@ -71,7 +71,7 @@ export interface CareerLearningRecord {
 
 export interface MockInterviewRecord {
   id: string;
-  resumeVersionId: string;
+  resumeVersionId?: string;
   roleId?: string;
   recordedAt: string;
   learningRecordIds: string[];
@@ -114,11 +114,11 @@ const StateSchema = z.object({
     approval: z.object({ approvedBy: z.string().min(1), approvedAt: z.string().min(1) }).strict().optional(),
   }).strict()),
   activeResumeVersionId: z.string().optional(),
-  interviews: z.array(z.object({ id: z.string().min(1), resumeVersionId: z.string().min(1), roleId: z.string().optional(), recordedAt: z.string().min(1), learningRecordIds: z.array(z.string()) }).strict()),
+  interviews: z.array(z.object({ id: z.string().min(1), resumeVersionId: z.string().min(1).optional(), roleId: z.string().optional(), recordedAt: z.string().min(1), learningRecordIds: z.array(z.string()) }).strict()),
   learningRecords: z.array(z.object({
     id: z.string().min(1), assessmentType: z.literal('practice-feedback'), reviewStatus: z.enum(['needs-review', 'reviewed']),
     summary: z.string().min(1), weakPoint: z.string().min(1), source: SourceSchema,
-    resumeVersionId: z.string().min(1), createdAt: z.string().min(1), latestScore: z.number().int().min(0).max(5).optional(),
+    resumeVersionId: z.string().min(1).optional(), createdAt: z.string().min(1), latestScore: z.number().int().min(0).max(5).optional(),
     reviewRounds: z.number().int().nonnegative(), reviewHistory: z.array(z.object({ score: z.number().int().min(0).max(5), reviewedAt: z.string().min(1) }).strict()),
     nextReviewAt: z.string().min(1).optional(), repetition: z.number().int().nonnegative().optional(),
     intervalDays: z.number().int().nonnegative().optional(), mastery: z.number().int().min(0).max(5).optional(),
@@ -232,7 +232,7 @@ export class JsonCareerPreparation {
   }
 
   async recordMockInterview(input: {
-    resumeVersionId: string;
+    resumeVersionId?: string;
     roleId?: string;
     feedback: MockInterviewFeedbackInput[];
     recordedAt?: string;
@@ -240,20 +240,22 @@ export class JsonCareerPreparation {
     if (input.feedback.length > 20) throw new Error('An interview can have at most 20 feedback items');
     input.feedback.forEach((item) => { requireText(item.summary, 'feedback summary', 2_000); requireText(item.weakPoint, 'weak point', 2_000); });
     return this.mutate((state) => {
-      const resume = state.resumes.find((item) => item.id === input.resumeVersionId);
-      if (!resume) throw new Error(`Unknown resume version: ${input.resumeVersionId}`);
-      const roleId = input.roleId ?? resume.roleId;
+      const resume = input.resumeVersionId
+        ? state.resumes.find((item) => item.id === input.resumeVersionId)
+        : undefined;
+      if (input.resumeVersionId && !resume) throw new Error(`Unknown resume version: ${input.resumeVersionId}`);
+      const roleId = input.roleId ?? resume?.roleId;
       if (roleId && !state.roles.some((item) => item.id === roleId)) throw new Error(`Unknown role requirements: ${roleId}`);
       const interviewId = randomUUID();
       const recordedAt = input.recordedAt ?? this.now().toISOString();
       const learningRecords = input.feedback.map((feedback): CareerLearningRecord => ({
         id: randomUUID(), assessmentType: 'practice-feedback', reviewStatus: 'needs-review',
         summary: feedback.summary, weakPoint: feedback.weakPoint, source: copy(feedback.source),
-        resumeVersionId: resume.id, createdAt: recordedAt, reviewRounds: 0, reviewHistory: [],
+        ...(resume ? { resumeVersionId: resume.id } : {}), createdAt: recordedAt, reviewRounds: 0, reviewHistory: [],
         nextReviewAt: addDays(recordedAt, 1), repetition: 0, intervalDays: 1, mastery: 1, reviewState: 'active',
       }));
       const interview: MockInterviewRecord = {
-        id: interviewId, resumeVersionId: resume.id, roleId, recordedAt,
+        id: interviewId, ...(resume ? { resumeVersionId: resume.id } : {}), ...(roleId ? { roleId } : {}), recordedAt,
         learningRecordIds: learningRecords.map((record) => record.id),
       };
       state.interviews.push(interview);

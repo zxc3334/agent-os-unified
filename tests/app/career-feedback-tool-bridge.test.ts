@@ -57,6 +57,36 @@ test('owner-authorized NL interview feedback becomes reviewable learning, never 
   }
 });
 
+test('explicitly authorized feedback can be saved without an approved resume', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'career-feedback-no-resume-'));
+  const career = new JsonCareerPreparation(join(directory, 'career.json'), () => new Date('2026-10-07T12:00:00.000Z'));
+  const bridge = new CareerFeedbackToolBridge(career);
+  const port = await bridge.start();
+  const invocation = bridge.issue({
+    actorId: 'owner', ownerId: 'owner', sourceId: 'message-no-resume',
+    receivedAt: '2026-10-07T12:00:00.000Z',
+  });
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/api/career/interview-feedback`, {
+      method: 'POST', headers: { 'content-type': 'application/json', 'x-career-feedback-token': invocation.token },
+      body: JSON.stringify({ summary: 'The explanation was structured.', weakPoint: 'Clarify the failure boundary.' }),
+    });
+    assert.equal(response.status, 201);
+    const result = await response.json() as { status: string; learningRecordId: string; resumeVersionId?: string };
+    assert.equal(result.status, 'saved');
+    assert.equal(result.resumeVersionId, undefined);
+    const records = await career.listLearningRecords();
+    assert.equal(records.length, 1);
+    assert.equal(records[0]?.resumeVersionId, undefined);
+    assert.equal(records[0]?.source.id, 'message-no-resume');
+    assert.equal((await career.listMockInterviews())[0]?.resumeVersionId, undefined);
+  } finally {
+    invocation.release();
+    await bridge.close();
+    await rm(directory, { recursive: true, force: true });
+  }
+});
+
 test('career feedback bridge rejects non-owner, released or invalid requests without persistence', async () => {
   const ctx = await setup();
   const nonOwner = ctx.bridge.issue({ actorId: 'guest', ownerId: 'owner', sourceId: 'group-msg', receivedAt: '2026-10-07T12:00:00.000Z', resumeVersionId: ctx.resume.id });

@@ -377,7 +377,7 @@ server.registerTool(
       '仅当用户明确要求保存模拟面试反馈或明确同意保存后调用；未同意时先询问。',
       'summary 概括本轮表现，weakPoint 写一个真实暴露的薄弱点，locator 可写对应问题/轮次。不要编造内容。',
       '此工具只创建待复习 practice-feedback 学习记录，绝不会创建或确认简历证据。仅在所有者私聊、且已启用求职面试能力包时可用。',
-      '只有返回 status=saved 才表示已持久保存；返回 reviewStatus 和 learningRecordId 后如实告知用户。',
+      '有已批准简历时记录会自动关联该版本；没有时仍可保存为独立反馈。只有返回 status=saved 才表示已持久保存；返回 reviewStatus 和 learningRecordId 后如实告知用户。',
     ].join(''),
     inputSchema: SaveCareerInterviewFeedbackSchema,
   },
