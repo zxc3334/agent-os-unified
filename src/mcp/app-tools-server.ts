@@ -48,6 +48,16 @@ async function callScheduleManage(input: unknown): Promise<{
       isError: true,
     };
   }
+  const trustedGrantRaw = process.env.AGENT_OS_AUTHORIZED_MEMORY_SPACE_IDS;
+  let authorizedMemorySpaceIds: string[] = [];
+  if (trustedGrantRaw) {
+    try {
+      const value: unknown = JSON.parse(trustedGrantRaw);
+      if (Array.isArray(value) && value.every((id) => typeof id === 'string')) {
+        authorizedMemorySpaceIds = [...new Set(value)];
+      }
+    } catch { /* Invalid host context fails closed to no memory grant. */ }
+  }
   const port = Number(process.env.SCHEDULE_API_PORT ?? 3101);
   const token = process.env.SCHEDULE_API_TOKEN;
   let response: Response;
@@ -58,7 +68,7 @@ async function callScheduleManage(input: unknown): Promise<{
         'content-type': 'application/json',
         ...(token ? { 'x-api-token': token } : {}),
       },
-      body: JSON.stringify({ request: input, chatId, creatorOpenId }),
+      body: JSON.stringify({ request: input, chatId, creatorOpenId, authorizedMemorySpaceIds }),
     });
   } catch (error) {
     return {

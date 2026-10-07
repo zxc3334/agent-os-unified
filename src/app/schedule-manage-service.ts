@@ -15,6 +15,8 @@ export interface ScheduleManageContext {
   runStore: ScheduleRunStore;
   chatId: string;
   creatorOpenId: string;
+  /** Host-derived grant; schedule tool arguments cannot set or expand it. */
+  authorizedMemorySpaceIds?: readonly string[];
 }
 
 export interface ScheduleManageOutcome {
@@ -53,6 +55,9 @@ export async function executeScheduleManageRequest(
         targetBotId: request.targetBotId,
         prompt: request.prompt,
         rule: request.rule,
+        ...(context.authorizedMemorySpaceIds !== undefined
+          ? { authorizedMemorySpaceIds: [...context.authorizedMemorySpaceIds] }
+          : {}),
       });
       return {
         resultCard: buildScheduleCreatedCard(task),
@@ -66,6 +71,9 @@ export async function executeScheduleManageRequest(
         targetBotId: item.targetBotId,
         prompt: item.prompt,
         rule: item.rule,
+        ...(context.authorizedMemorySpaceIds !== undefined
+          ? { authorizedMemorySpaceIds: [...context.authorizedMemorySpaceIds] }
+          : {}),
       }));
       return {
         resultCard: buildScheduleListCard(tasks),

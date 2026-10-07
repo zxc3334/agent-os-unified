@@ -55,8 +55,7 @@ export async function runScheduledTaskDirectly(options: {
       store: runtime.unifiedTaskStore,
       memoryContext: new PersonalTaskMemoryProvider({
         store: runtime.personalMemoryStore,
-        // Scheduled tasks do not persist the originating session's allowlist.
-        // Owner identity alone is not a space grant, so this remains empty.
+        // Only the explicit matter grant persisted when this schedule was created is usable.
         directMessage: true,
       }),
       executor: {
@@ -92,7 +91,7 @@ export async function runScheduledTaskDirectly(options: {
       trusted: { actorId: task.creatorOpenId, ownerId: task.creatorOpenId },
       affairId: workflowAffairId(`schedule:${task.id}`),
       trigger: { source: 'schedule', sourceId: `${task.id}:${scheduledFor}`, occurredAt: scheduledFor },
-      authorizedMemorySpaceIds: [],
+      authorizedMemorySpaceIds: task.authorizedMemorySpaceIds ?? [],
       memoryQuery: task.prompt,
       input: { scheduleId: task.id, targetBotId: target.id },
       signal: run.signal,

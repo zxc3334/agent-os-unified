@@ -659,6 +659,7 @@ async function startConfiguredBot(
       const cliEnv: Record<string, string> = {
         AGENT_OS_CHAT_ID: msg.chatId,
         AGENT_OS_OWNER_OPEN_ID: collaboration?.ownerOpenId ?? msg.senderOpenId,
+        AGENT_OS_AUTHORIZED_MEMORY_SPACE_IDS: JSON.stringify(authorizedPersonalSpaceIds),
         // agy 没有项目级 MCP 配置，只能走全局垫片；垫片靠它找到本次运行的安装目录。
         AGENT_OS_HOME: resolve(import.meta.dirname, '..'),
       };

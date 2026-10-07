@@ -20,6 +20,7 @@ export const ScheduledTaskSchema = z.object({
   targetBotId: z.string().min(1),
   prompt: z.string().min(1),
   rule: ScheduleRuleSchema,
+  authorizedMemorySpaceIds: z.array(z.string().min(1)).optional(),
   status: z.enum(['active', 'paused', 'completed']),
   nextRunAt: z.string().optional(),
   lastRunAt: z.string().optional(),

@@ -44,6 +44,7 @@ export function startScheduleApi(options: ScheduleApiOptions): void {
           request?: unknown;
           chatId?: string;
           creatorOpenId?: string;
+          authorizedMemorySpaceIds?: unknown;
         };
         const parsed = ScheduleManageRequestSchema.safeParse(body?.request);
         if (!parsed.success) {
@@ -55,11 +56,16 @@ export function startScheduleApi(options: ScheduleApiOptions): void {
         if (!body?.chatId || !body?.creatorOpenId) {
           return sendJson(res, 400, { error: '缺少 chatId 或 creatorOpenId' });
         }
+        const authorizedMemorySpaceIds = Array.isArray(body.authorizedMemorySpaceIds)
+          && body.authorizedMemorySpaceIds.every((id) => typeof id === 'string' && id.length > 0 && id.length <= 200)
+          ? [...new Set(body.authorizedMemorySpaceIds)] as string[]
+          : [];
         const outcome = await executeScheduleManageRequest(parsed.data, {
           scheduler,
           runStore,
           chatId: body.chatId,
           creatorOpenId: body.creatorOpenId,
+          authorizedMemorySpaceIds,
         });
         return sendJson(res, 200, { ok: true, notice: outcome.notice });
       }

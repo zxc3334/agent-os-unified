@@ -27,7 +27,10 @@ export const CreateScheduledTaskSchema = z.object({
   rule: ScheduleRuleSchema,
 });
 
-export type CreateScheduledTask = z.infer<typeof CreateScheduledTaskSchema>;
+export type CreateScheduledTask = z.infer<typeof CreateScheduledTaskSchema> & {
+  /** Trusted grant copied from the owner matter at creation; never accepted from model tool arguments. */
+  authorizedMemorySpaceIds?: string[];
+};
 
 const ScheduleAddSchema = z.object({
   targetBotId: z.string().regex(/^[a-z0-9][a-z0-9_-]{0,31}$/),
@@ -70,6 +73,8 @@ export interface ScheduledTask {
   targetBotId: string;
   prompt: string;
   rule: ScheduleRule;
+  /** Absent for legacy or ungranted schedules; empty means explicitly no spaces. */
+  authorizedMemorySpaceIds?: string[];
   status: 'active' | 'paused' | 'completed';
   nextRunAt?: string;
   lastRunAt?: string;
@@ -88,6 +93,9 @@ export function createScheduledTask(
     targetBotId: options.targetBotId,
     prompt: options.prompt,
     rule: options.rule,
+    ...(options.authorizedMemorySpaceIds !== undefined
+      ? { authorizedMemorySpaceIds: [...new Set(options.authorizedMemorySpaceIds)] }
+      : {}),
     status: 'active',
     createdAt: now,
     updatedAt: now,

@@ -43,3 +43,11 @@
 - Document-comment events carry no comment body, so they do not perform broad/empty-query recall; they remain empty unless a meaningful trusted query becomes available.
 - Public behavior tests exercise a continuation prompt receiving only memory in its explicit session grant, excluding other spaces, and a continuation with no grant receiving no memory. Existing provider tests cover non-owner/group denial and empty grants.
 - Verification: focused continuation and memory-context tests pass; `pnpm build` and `git diff --check` pass. Ticket 05 remains in progress: scheduled-task grant persistence, cross-thread affair selection/continuation, and broader end-to-end Feishu flow validation remain open.
+
+
+### Durable scheduled-task memory grant
+
+- New schedules created from an owner’s direct message now persist a copy of that matter’s already-filtered authorized memory-space allowlist. The allowlist comes from host execution context, not model-supplied `schedule_manage` arguments; it is deduplicated and carried to scheduled execution through the unified runtime preparation seam. Legacy schedules without a grant remain empty, and group/non-owner creation receives no personal-space grant.
+- Tests verify tool arguments cannot inject a grant, trusted matter scope is persisted and survives store reopen, and legacy records remain ungranted.
+- Verification: `pnpm test` (133/133), `pnpm build`, `git diff --check`.
+- Remaining: cross-thread affair selection/continuation and broader end-to-end Feishu validation. Ticket remains in progress.
