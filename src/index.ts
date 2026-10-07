@@ -41,6 +41,8 @@ import { dailyRecordSearchProvider, personalMemorySearchProvider, textMaterialSe
 import { JsonTextMaterialLibrary } from './core/text-materials.js';
 import { CareerReviewSchedulerAdapter } from './core/review-scheduler.js';
 import { buildCareerContext } from './core/career-context.js';
+import { JsonCareerReviewNotificationStore } from './core/career-review-notifications.js';
+import { CareerReviewNotificationScheduler } from './app/career-review-notification.js';
 import { PersonalReminderScheduler } from './app/personal-reminder-scheduler.js';
 import { SessionManager } from './core/session-manager.js';
 import { JsonSessionStore } from './core/session-store.js';
@@ -161,6 +163,17 @@ const personalMemoryStore = configuredOwnerOpenId
   : undefined;
 const personalSkills = new JsonPersonalSkillRegistry(join(privateDataRoot, 'personal-skills.json'));
 const careerPreparation = new JsonCareerPreparation(join(privateDataRoot, 'career-preparation.json'));
+const careerReviewNotifications = new JsonCareerReviewNotificationStore(join(privateDataRoot, 'career-review-notifications.json'));
+const careerReviewNotificationScheduler = new CareerReviewNotificationScheduler({
+  career: careerPreparation,
+  store: careerReviewNotifications,
+  ownerId: configuredOwnerOpenId,
+  getBot: (botId) => {
+    const runtime = botRuntimes.get(botId);
+    return runtime ? { botId, bot: runtime.bot } : undefined;
+  },
+  onError: (message) => console.error(`[面试复习提醒] ${message}`),
+});
 const textMaterials = configuredOwnerOpenId
   ? new JsonTextMaterialLibrary(join(privateDataRoot, 'text-materials.json'), configuredOwnerOpenId)
   : undefined;
@@ -282,6 +295,19 @@ async function startConfiguredBot(
         )
       : undefined,
     onMessage: async (msg, bot) => {
+      if (msg.chatType === 'p2p' && configuredOwnerOpenId && msg.senderOpenId === configuredOwnerOpenId) {
+        try {
+          await careerReviewNotificationScheduler.rememberOwnerConversation({
+            ownerId: msg.senderOpenId,
+            botId: config.id,
+            chatId: msg.chatId,
+            chatType: msg.chatType,
+          });
+        } catch (error) {
+          // Notification-target persistence must not prevent ordinary owner messages.
+          console.error(`[面试复习提醒] 私聊目标保存失败: ${(error as Error).message}`);
+        }
+      }
       // 消息幂等去重：飞书是 at-least-once 投递，同一条消息可能被重推。
       // 不去重会重复执行（实际发生过：一次 /schedule run 被当成两次触发）。
       if (!messageDeduplicator.acquire(msg.messageId)) {
@@ -1296,6 +1322,7 @@ await Promise.all(
 
 await scheduler.start();
 personalReminderScheduler.start();
+careerReviewNotificationScheduler.start();
 // Resume only the dedicated learning-extraction stream after restart. Ordinary
 // scheduled tasks never touch these cursors; failures remain retryable on the next
 // eligible message or an explicit /memory extract command.
