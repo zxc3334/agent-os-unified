@@ -13,6 +13,8 @@ export interface Session {
   cliSessionId?: string;
   /** Matter-scoped personal-memory allowlist; undefined means owner-authorized defaults. */
   memorySpaceIds?: string[];
+  /** Stable personal affair identity; does not contain an engine-native session ID. */
+  affairId?: string;
   workspaceDir: string;
   status: SessionStatus;
   createdAt: string;
@@ -80,6 +82,10 @@ export class SessionManager {
 
   get size(): number {
     return this.sessions.size;
+  }
+
+  list(): Session[] {
+    return [...this.sessions.values()].map((session) => ({ ...session, memorySpaceIds: session.memorySpaceIds ? [...session.memorySpaceIds] : undefined }));
   }
 
   get(sessionId: string): Session | undefined {
@@ -186,6 +192,40 @@ export class SessionManager {
       throw error;
     }
     return updated;
+  }
+
+  async selectAffair(
+    sessionId: string,
+    affairId: string,
+    memorySpaceIds: readonly string[],
+  ): Promise<Session> {
+    if (!affairId.trim()) throw new Error('事项 ID 不能为空');
+    const current = this.get(sessionId);
+    if (!current) throw new Error(`会话不存在: ${sessionId}`);
+    if (current.status === 'active') throw new Error('当前事项仍在执行，不能切换事项');
+    const updated: Session = {
+      ...current,
+      affairId,
+      memorySpaceIds: [...new Set(memorySpaceIds)],
+      // Native CLI history belongs to this thread + engine, never to the selected affair.
+      cliSessionId: !current.affairId || current.affairId === affairId ? current.cliSessionId : undefined,
+      updatedAt: this.now().toISOString(),
+    };
+    const key = sessionKey(updated.botId, updated.chatId, updated.threadId);
+    this.sessions.set(key, updated);
+    try { await this.persist(); }
+    catch (error) {
+      if (this.sessions.get(key) === updated) this.sessions.set(key, current);
+      throw error;
+    }
+    return updated;
+  }
+
+  async setAffairId(sessionId: string, affairId: string): Promise<Session> {
+    const current = this.get(sessionId);
+    if (!current) throw new Error(`会话不存在: ${sessionId}`);
+    if (current.affairId === affairId) return current;
+    return this.selectAffair(sessionId, affairId, current.memorySpaceIds ?? []);
   }
 
   async setMemorySpaceIds(

@@ -19,6 +19,8 @@ import { formatSessionStatus } from "./session-view.js";
 import type { AppRuntime } from "./runtime.js";
 import type { Scheduler } from "./scheduler.js";
 import type { PersonalMemoryStore } from "../core/personal-memory.js";
+import type { JsonPersonalAffairStore } from "../core/affairs.js";
+import { cleanSummary, MAX_AFFAIR_SUMMARY_CHARS } from "../core/affairs.js";
 import type { MemoryExtractionWorker } from "../core/memory-worker.js";
 import { PERSONAL_SKILLS, type JsonPersonalSkillRegistry } from "../core/personal-skills.js";
 import type { JsonCareerPreparation } from "../core/career-preparation.js";
@@ -55,6 +57,7 @@ export async function handleSessionCommand(options: {
   blogAssociations?: JsonBlogAssociations;
   dailyRecords?: JsonDailyRecordsReminders;
   personalReminderScheduler?: PersonalReminderScheduler;
+  personalAffairStore?: JsonPersonalAffairStore;
 }): Promise<CommandOutcome> {
   const {
     runtime,
@@ -79,6 +82,7 @@ export async function handleSessionCommand(options: {
     blogAssociations,
     dailyRecords,
     personalReminderScheduler,
+    personalAffairStore,
   } = options;
 
   if (!isNew && cliRequest && cliRequest.cliId !== session.cliId) {
@@ -87,6 +91,61 @@ export async function handleSessionCommand(options: {
       `当前话题已经在使用 ${cliAdapter.displayName}。如需切换执行引擎，请新开一个话题。`,
       hasThread,
     );
+    return "handled";
+  }
+
+  if (command?.name === "affair") {
+    if (!trustedOwnerOpenId || msg.senderOpenId !== trustedOwnerOpenId || msg.chatType !== "p2p") {
+      await bot.reply(msg.messageId, "个人事项切换仅限所有者在私聊中使用。", hasThread);
+      return "handled";
+    }
+    if (!personalAffairStore) {
+      await bot.reply(msg.messageId, "个人事项存储暂不可用。", hasThread);
+      return "handled";
+    }
+    if (session.status === "active" || runtime.activeRuns.has(session.id)) {
+      await bot.reply(msg.messageId, "当前事项仍在执行，不能切换或编辑事项。", hasThread);
+      return "handled";
+    }
+    const affairId = session.affairId;
+    if (!affairId) {
+      await bot.reply(msg.messageId, "当前事项尚未建立，请先发送一条普通消息后再管理事项。", hasThread);
+      return "handled";
+    }
+    try {
+      if (command.action === "list") {
+        const affairs = await personalAffairStore.listForSelection(trustedOwnerOpenId, msg.senderOpenId, msg.chatId, session.threadId, new Date(msg.receivedAt), 20);
+        const lines = affairs.slice(0, 20).map((item) => `${item.id === affairId ? "▶ " : "• "}${item.id}${item.summary ? ` — ${item.summary}` : " — （暂无摘要）"}`);
+        await bot.reply(msg.messageId, `${lines.length ? `本私聊中已使用的事项（最多 20 条）：\n${lines.join("\n")}` : "本私聊还没有其他事项。"}\n切换：/affair select <事项ID>；编辑摘要：/affair summary <简短摘要>`, hasThread);
+      } else if (command.action === "summary") {
+        const summary = cleanSummary(command.summary);
+        const updated = await personalAffairStore.setSummary(affairId, trustedOwnerOpenId, msg.senderOpenId, msg.chatId, summary, msg.receivedAt);
+        await bot.reply(msg.messageId, summary
+          ? `当前事项摘要已保存（${Array.from(updated.summary).length}/${MAX_AFFAIR_SUMMARY_CHARS} 字）：${updated.summary}`
+          : "当前事项摘要已清空。", hasThread);
+      } else {
+        const target = await personalAffairStore.getListedForSelection(command.affairId, trustedOwnerOpenId, msg.senderOpenId, msg.chatId, session.threadId, new Date(msg.receivedAt));
+        if (!target) {
+          await bot.reply(msg.messageId, "没有找到本所有者、本私聊中的该事项。", hasThread);
+          return "handled";
+        }
+        const available = personalMemoryStore ? await personalMemoryStore.listSpaces() : undefined;
+        const availableIds = available ? new Set(available.map((space) => space.id)) : undefined;
+        const scope = target.memorySpaceIds.filter((id) => !availableIds || availableIds.has(id));
+        const otherActiveSession = runtime.sessions.list().some((item) =>
+          item.id !== session.id && item.affairId === target.id
+          && (item.status === "active" || runtime.activeRuns.has(item.id)),
+        );
+        if (otherActiveSession) {
+          await bot.reply(msg.messageId, "该事项正在另一个线程执行，暂不能切换接续。", hasThread);
+          return "handled";
+        }
+        await runtime.sessions.selectAffair(session.id, target.id, scope);
+        await bot.reply(msg.messageId, `已切换到事项 ${target.id}。只带入了该事项的摘要与 ${scope.length} 个仍有效的授权记忆空间；当前线程的原生 CLI 会话已隔离，不会复用其他线程的 session。${target.summary ? `\n事项摘要：${target.summary}` : "\n该事项尚无摘要。"}`, hasThread);
+      }
+    } catch {
+      await bot.reply(msg.messageId, "个人事项操作失败；未能确认已完成切换或保存。", hasThread);
+    }
     return "handled";
   }
 
@@ -436,6 +495,7 @@ export async function handleSessionCommand(options: {
       if (command.action === "space-create") {
         const created = await personalMemoryStore.createSpace(command.nameText);
         await runtime.sessions.setMemorySpaceIds(session.id, [created.id]);
+        if (session.affairId && personalAffairStore && trustedOwnerOpenId) await personalAffairStore.setMemorySpaceIds(session.affairId, trustedOwnerOpenId, msg.senderOpenId, msg.chatId, [created.id], msg.receivedAt);
         await bot.reply(msg.messageId, `已创建记忆空间「${safe(created.name, 100)}」[${created.id}]，并将本事项范围切换到该空间。`, hasThread);
         return "handled";
       }
@@ -462,6 +522,7 @@ export async function handleSessionCommand(options: {
         const updated = command.spaceId === "all"
           ? await runtime.sessions.setMemorySpaceIds(session.id, undefined)
           : await runtime.sessions.setMemorySpaceIds(session.id, [command.spaceId]);
+        if (session.affairId && personalAffairStore && trustedOwnerOpenId) await personalAffairStore.setMemorySpaceIds(session.affairId, trustedOwnerOpenId, msg.senderOpenId, msg.chatId, command.spaceId === "all" ? allSpaceIds : [command.spaceId], msg.receivedAt);
         const selected = command.spaceId === "all" ? "全部个人记忆空间" : names.get(command.spaceId) ?? command.spaceId;
         await bot.reply(msg.messageId, `本事项的个人记忆范围已设为「${selected}」。`, hasThread);
         return "handled";
@@ -544,6 +605,7 @@ export async function handleSessionCommand(options: {
       [
         "/status 查看当前会话",
         "/task recent 查看最近个人事项；/task trace <事项ID> 查看无正文的执行步骤",
+        "/affair list 查看本私聊事项；/affair select <事项ID> 切换；/affair summary <摘要> 编辑摘要",
         "/team 查看当前 Agent 团队",
         "/schedule <需求> 创建定时任务",
         "/schedules 查看定时任务",

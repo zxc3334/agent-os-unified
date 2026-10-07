@@ -20,6 +20,9 @@ export type SlashCommand =
   | { name: 'career'; action: 'material-add'; spaceId: string; title: string; content: string }
   | { name: 'career'; action: 'material-search'; query: string }
   | { name: 'career'; action: 'material-revoke'; materialId: string }
+  | { name: 'affair'; action: 'list' }
+  | { name: 'affair'; action: 'select'; affairId: string }
+  | { name: 'affair'; action: 'summary'; summary: string }
   | { name: 'task'; action: 'recent' }
   | { name: 'task'; action: 'trace'; taskId: string }
   | { name: 'blog'; action: 'search'; query: string }
@@ -48,6 +51,7 @@ const SCHEDULES_RE = /^(?:@.+?\s+)?\/schedules\s*$/;
 const TOPICS_RE = /^(?:@.+?\s+)?\/topics\s*$/;
 const SKILLS_RE = /^(?:@.+?\s+)?\/skills(?:\s+([\s\S]+?))?\s*$/;
 const CAREER_RE = /^(?:@.+?\s+)?\/career(?:\s+([\s\S]+?))?\s*$/;
+const AFFAIR_RE = /^(?:@.+?\s+)?\/affair(?:\s+([\s\S]+?))?\s*$/;
 const TASK_RE = /^(?:@.+?\s+)?\/task(?:\s+([\s\S]+?))?\s*$/;
 const BLOG_RE = /^(?:@.+?\s+)?\/blog(?:\s+([\s\S]+?))?\s*$/;
 const DAILY_RE = /^(?:@.+?\s+)?\/daily(?:\s+([\s\S]+?))?\s*$/;
@@ -110,6 +114,16 @@ export function parseCommand(text: string): SlashCommand | undefined {
     if (propose?.[1]?.trim() && propose[2]?.trim()) return { name: 'blog', action: 'propose', query: propose[1].trim(), intendedUse: propose[2].trim() };
     const decide = /^decide\s+([A-Za-z0-9][A-Za-z0-9_-]{0,99})\s+(accept|reject|none)$/.exec(args);
     if (decide) return { name: 'blog', action: 'decide', proposalId: decide[1]!, decision: decide[2] === 'accept' ? 'accepted' : decide[2] === 'reject' ? 'rejected' : 'no-connection' };
+    return undefined;
+  }
+  const affairMatch = AFFAIR_RE.exec(value);
+  if (affairMatch) {
+    const args = affairMatch[1]?.trim() ?? '';
+    if (!args || args === 'list') return { name: 'affair', action: 'list' };
+    const select = /^select\s+([A-Za-z0-9][A-Za-z0-9._:-]{0,199})$/.exec(args);
+    if (select) return { name: 'affair', action: 'select', affairId: select[1]! };
+    const summary = /^summary(?:\s+([\s\S]+))?$/.exec(args);
+    if (summary) return { name: 'affair', action: 'summary', summary: summary[1]?.trim() ?? '' };
     return undefined;
   }
   const taskMatch = TASK_RE.exec(value);

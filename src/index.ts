@@ -108,6 +108,7 @@ import { startScheduleApi } from './app/schedule-api.js';
 import { startScheduleFileWatcher } from './app/schedule-watcher.js';
 import type { AppRuntime, BotRuntime } from './app/runtime.js';
 import { JsonUnifiedTaskStore, UnifiedTaskRuntime, conversationAffairId, workflowAffairId } from './app/unified-task-runtime.js';
+import { JsonPersonalAffairStore, formatAffairSummaryContext } from './core/affairs.js';
 import type { CliEvent, CliRunResult } from './cli/types.js';
 
 const botConfigPath = resolve(
@@ -155,6 +156,7 @@ const approvalFlows = new JsonApprovalFlowStore(
 const unifiedTaskStore = new JsonUnifiedTaskStore(join('data', 'unified-tasks.json'));
 const configuredOwnerOpenId = process.env.OWNER_OPEN_ID?.trim() || undefined;
 const privateDataRoot = resolve(process.env.AGENT_OS_DATA_ROOT ?? join('data'));
+const personalAffairStore = new JsonPersonalAffairStore(join(privateDataRoot, 'affairs.json'));
 const personalMemoryStore = configuredOwnerOpenId
   ? new PersonalMemoryStore({
       directory: join(privateDataRoot, 'personal-memory'),
@@ -400,6 +402,22 @@ async function startConfiguredBot(
       );
       let { session } = resolvedSession;
       const { isNew } = resolvedSession;
+      if (configuredOwnerOpenId && msg.chatType === 'p2p' && msg.senderOpenId === configuredOwnerOpenId && session.status !== 'active') {
+        const initialSpaces = personalMemoryStore ? await personalMemoryStore.listSpaces().catch(() => []) : [];
+        const affairId = session.affairId ?? conversationAffairId(msg.chatId, session.threadId);
+        const affair = await personalAffairStore.ensure({
+          id: affairId,
+          ownerId: configuredOwnerOpenId,
+          actorId: msg.senderOpenId,
+          chatId: msg.chatId,
+          memorySpaceIds: session.memorySpaceIds ?? initialSpaces.map((space) => space.id),
+          now: msg.receivedAt,
+        });
+        if (session.affairId !== affair.id) session = await sessions.selectAffair(session.id, affair.id, affair.memorySpaceIds);
+        else if (JSON.stringify(session.memorySpaceIds ?? []) !== JSON.stringify(affair.memorySpaceIds)) {
+          session = await sessions.setMemorySpaceIds(session.id, affair.memorySpaceIds);
+        }
+      }
       if (command && isNew && session.status === 'creating') {
         session = await sessions.transition(session.id, 'idle');
       }
@@ -507,6 +525,7 @@ async function startConfiguredBot(
         blogAssociations,
         dailyRecords,
         personalReminderScheduler,
+        personalAffairStore,
       });
       if (commandOutcome === 'handled') return;
 
@@ -561,6 +580,16 @@ async function startConfiguredBot(
           session.id,
           collaboration.workspaceDir,
         );
+      }
+
+      const ownerDirectChat = !!configuredOwnerOpenId
+        && msg.chatType === 'p2p'
+        && msg.senderOpenId === configuredOwnerOpenId;
+      let selectedAffairSummary = '';
+      if (ownerDirectChat) {
+        const affairId = session.affairId ?? conversationAffairId(msg.chatId, session.threadId);
+        const affair = await personalAffairStore.get(affairId, configuredOwnerOpenId!, msg.senderOpenId, msg.chatId);
+        if (affair) selectedAffairSummary = formatAffairSummaryContext(affair.summary);
       }
 
       await sessions.transition(session.id, 'active');
@@ -730,7 +759,7 @@ async function startConfiguredBot(
                   taskText,
                   teamRegistry.contextFor(config.id),
                   agentOsConfig.defaultProductDeliveryMode,
-                  [personalSkillContext, personalTaskMemory.text, careerContext, memoryContext].filter(Boolean).join('\n\n'),
+                  [personalSkillContext, personalTaskMemory.text, selectedAffairSummary, careerContext, memoryContext].filter(Boolean).join('\n\n'),
                 );
                 const onCliEvent = (event: CliEvent) => {
                   if (
@@ -778,7 +807,7 @@ async function startConfiguredBot(
             },
           }).run({
             trusted: { actorId: msg.senderOpenId, ownerId: ownerOpenId },
-            affairId: collaboration ? workflowAffairId(collaboration.taskId) : conversationAffairId(msg.chatId, session.threadId),
+            affairId: collaboration ? workflowAffairId(collaboration.taskId) : (session.affairId ?? conversationAffairId(msg.chatId, session.threadId)),
             trigger: {
               source: collaboration ? 'collaboration' : 'message',
               sourceId: msg.messageId,
