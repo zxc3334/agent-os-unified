@@ -22,6 +22,8 @@ import { markSessionIdle } from './session-view.js';
 import type { AppRuntime } from './runtime.js';
 import { assertProductSpecDocuments } from './product-spec-documents.js';
 import { ensureProductSpecSubmission } from './product-spec-submission.js';
+import { runContinuationThroughUnifiedTask } from './unified-task-continuation.js';
+import type { CliRunResult } from '../cli/types.js';
 
 export async function continueClarificationFlow(options: {
   runtime: AppRuntime;
@@ -30,6 +32,7 @@ export async function continueClarificationFlow(options: {
   flow: ClarificationFlow;
   run: AbortController;
   defaultDeliveryMode: 'local' | 'lark-doc';
+  actorOpenId?: string;
 }): Promise<void> {
   const { bot, config, flow, run, runtime, defaultDeliveryMode } = options;
   const session = runtime.sessions.get(flow.sessionId);
@@ -73,23 +76,34 @@ export async function continueClarificationFlow(options: {
   heartbeat.unref();
 
   try {
-    const result = await executeCli(
-      adapter,
-      formatClarificationAnswers(flow),
-      session.workspaceDir,
-      session.cliSessionId,
-      run.signal,
-      [],
-      (event) => {
-        if (
-          event.type !== 'tool_start'
-          && event.type !== 'tool_end'
-          && event.type !== 'context'
-        ) return;
-        progress.accept(event);
-        renderProgress();
-      },
-    );
+    const result = await runContinuationThroughUnifiedTask<CliRunResult>({
+      runtime,
+      source: 'clarification',
+      sourceId: `${flow.originalMessageId}:${flow.token}:${flow.answers.length}`,
+      occurredAt: new Date().toISOString(),
+      actorId: options.actorOpenId ?? flow.ownerOpenId,
+      ownerId: flow.ownerOpenId,
+      affairId: `${config.id}:${flow.taskId}`,
+      input: { botId: config.id, sessionId: session.id, taskId: flow.taskId, answerCount: flow.answers.length },
+      signal: run.signal,
+      execute: (signal) => executeCli(
+        adapter,
+        formatClarificationAnswers(flow),
+        session.workspaceDir,
+        session.cliSessionId,
+        signal,
+        [],
+        (event) => {
+          if (
+            event.type !== 'tool_start'
+            && event.type !== 'tool_end'
+            && event.type !== 'context'
+          ) return;
+          progress.accept(event);
+          renderProgress();
+        },
+      ),
+    });
     clearInterval(heartbeat);
     if (result.sessionId) {
       await runtime.sessions.setCliSessionId(session.id, result.sessionId);
@@ -133,23 +147,34 @@ export async function continueClarificationFlow(options: {
       const submission = await ensureProductSpecSubmission({
         result,
         defaultDeliveryMode,
-        retry: (retryPrompt, resultSessionId) => executeCli(
-          adapter,
-          retryPrompt,
-          session.workspaceDir,
-          resultSessionId ?? session.cliSessionId,
-          run.signal,
-          [],
-          (event) => {
-            if (
-              event.type !== 'tool_start'
-              && event.type !== 'tool_end'
-              && event.type !== 'context'
-            ) return;
-            progress.accept(event);
-            renderProgress();
-          },
-        ),
+        retry: (retryPrompt, resultSessionId) => runContinuationThroughUnifiedTask<CliRunResult>({
+          runtime,
+          source: 'clarification',
+          sourceId: `${flow.originalMessageId}:${flow.token}:product-spec-retry`,
+          occurredAt: new Date().toISOString(),
+          actorId: options.actorOpenId ?? flow.ownerOpenId,
+          ownerId: flow.ownerOpenId,
+          affairId: `${config.id}:${flow.taskId}`,
+          input: { botId: config.id, sessionId: session.id, taskId: flow.taskId, retry: true },
+          signal: run.signal,
+          execute: (signal) => executeCli(
+            adapter,
+            retryPrompt,
+            session.workspaceDir,
+            resultSessionId ?? session.cliSessionId,
+            signal,
+            [],
+            (event) => {
+              if (
+                event.type !== 'tool_start'
+                && event.type !== 'tool_end'
+                && event.type !== 'context'
+              ) return;
+              progress.accept(event);
+              renderProgress();
+            },
+          ),
+        }),
       });
       const { request: productSpecRequest } = submission;
       if (submission.result.sessionId) {

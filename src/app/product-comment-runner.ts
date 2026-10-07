@@ -4,6 +4,8 @@ import type { Bot, IncomingDocumentComment } from '../im/lark.js';
 import { executeCli } from './cli-execution.js';
 import { markSessionIdle } from './session-view.js';
 import type { AppRuntime } from './runtime.js';
+import { runContinuationThroughUnifiedTask } from './unified-task-continuation.js';
+import type { CliRunResult } from '../cli/types.js';
 
 export async function runProductDocumentComment(options: {
   runtime: AppRuntime;
@@ -32,15 +34,26 @@ export async function runProductDocumentComment(options: {
 
   try {
     const adapter = getCliAdapter(session.cliId);
-    const result = await executeCli(
-      adapter,
-      documentCommentPrompt(flow, comment),
-      session.workspaceDir,
-      session.cliSessionId,
-      run.signal,
-      [],
-      () => undefined,
-    );
+    const result = await runContinuationThroughUnifiedTask<CliRunResult>({
+      runtime,
+      source: 'comment',
+      sourceId: comment.eventId || `${comment.fileToken}:${comment.commentId}:${comment.replyId}`,
+      occurredAt: new Date().toISOString(),
+      actorId: comment.senderOpenId || 'system:document-comment',
+      ownerId: flow.ownerOpenId,
+      affairId: `${flow.botId}:${flow.taskId}`,
+      input: { botId: flow.botId, sessionId: session.id, taskId: flow.taskId, commentId: comment.commentId, fileToken: comment.fileToken },
+      signal: run.signal,
+      execute: (signal) => executeCli(
+        adapter,
+        documentCommentPrompt(flow, comment),
+        session.workspaceDir,
+        session.cliSessionId,
+        signal,
+        [],
+        () => undefined,
+      ),
+    });
     if (result.sessionId) {
       await runtime.sessions.setCliSessionId(session.id, result.sessionId);
     }

@@ -14,6 +14,8 @@ import { executeCli } from './cli-execution.js';
 import { sendResultNotification } from './notification-service.js';
 import { markSessionIdle } from './session-view.js';
 import type { AppRuntime } from './runtime.js';
+import { runContinuationThroughUnifiedTask } from './unified-task-continuation.js';
+import type { CliRunResult } from '../cli/types.js';
 
 export async function continueApprovalFlow(options: {
   runtime: AppRuntime;
@@ -21,6 +23,7 @@ export async function continueApprovalFlow(options: {
   config: BotConfig;
   flow: ApprovalFlow;
   run: AbortController;
+  actorOpenId?: string;
 }): Promise<void> {
   const { bot, config, flow, run, runtime } = options;
   const session = runtime.sessions.get(flow.sessionId);
@@ -66,23 +69,34 @@ export async function continueApprovalFlow(options: {
   heartbeat.unref();
 
   try {
-    const result = await executeCli(
-      adapter,
-      formatApprovalDecision(flow),
-      session.workspaceDir,
-      session.cliSessionId,
-      run.signal,
-      [],
-      (event) => {
-        if (
-          event.type !== 'tool_start'
-          && event.type !== 'tool_end'
-          && event.type !== 'context'
-        ) return;
-        progress.accept(event);
-        renderProgress();
-      },
-    );
+    const result = await runContinuationThroughUnifiedTask<CliRunResult>({
+      runtime,
+      source: 'approval',
+      sourceId: `${flow.originalMessageId}:${flow.decidedAt ?? flow.status}`,
+      occurredAt: flow.decidedAt ?? new Date().toISOString(),
+      actorId: options.actorOpenId ?? 'system:approval-timeout',
+      ownerId: flow.ownerOpenId,
+      affairId: `${flow.botId}:${flow.taskId}`,
+      input: { botId: flow.botId, sessionId: session.id, taskId: flow.taskId },
+      signal: run.signal,
+      execute: (signal) => executeCli(
+        adapter,
+        formatApprovalDecision(flow),
+        session.workspaceDir,
+        session.cliSessionId,
+        signal,
+        [],
+        (event) => {
+          if (
+            event.type !== 'tool_start'
+            && event.type !== 'tool_end'
+            && event.type !== 'context'
+          ) return;
+          progress.accept(event);
+          renderProgress();
+        },
+      ),
+    });
     clearInterval(heartbeat);
     if (result.sessionId) {
       await runtime.sessions.setCliSessionId(session.id, result.sessionId);

@@ -15,8 +15,8 @@ Statuses below describe the checked-in implementation, not the intended final ar
 | 01 可信记忆底座 | Complete | Local authoritative store, versioned corrections, owner/space authorization, durable-write tests. |
 | 02 提取恢复 | Complete | Eligible-message trigger, explicit `/memory extract`, restart recovery, frozen/idempotent batches, original source identity/time, retry tests. |
 | 03 记忆审查反馈 | Complete | Owner-only `/memory` review/confirm/correct/reject/forget commands with temporary-store tests. |
-| 04 统一任务运行时 | In progress | Core runtime and ordinary-message/scheduled adapters are wired. Collaboration, card continuations, product comments, cross-adapter integration and affair-native-session isolation remain. |
-| 05 个人入口与技能 | In progress | Owner-DM bounded memory context and scoped search/save MCP tools exist. Four user-enabled built-in packs can guide career/interview, reading, research/blog, and daily-record tasks. Affair selection/continuation and shared runtime context provider remain. |
+| 04 统一任务运行时 | In progress | Core runtime, ordinary-message/scheduled adapters, approval/clarification continuations (including product-spec retry), and document comments are wired. Collaboration, end-to-end continuation route tests, affair-native-session isolation/summary carryover, and partial-result UI reconciliation remain. |
+| 05 个人入口与技能 | In progress | Owner-DM bounded memory context, scoped search/save MCP tools, and four user-enabled skill packs for career/interview, reading, research/blog, and daily-record tasks exist. Affair selection/continuation and shared runtime context provider remain. |
 | 06 求职闭环 | Not started (blocked by 05) | No resume/project evidence workflow, mock-interview skill, or feedback-to-review integration yet. |
 | 07 日常记录与提醒 | Not started (blocked by 05) | No dated daily/read/exploration record flow or reminder lifecycle integration yet. |
 | 08 博客关联与草稿 | Not started (blocked by 06 and 07) | No authorized cross-space association proposals, stance-aware drafting, or public-use checks yet. |

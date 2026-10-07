@@ -28,8 +28,9 @@ export async function scheduleApprovalContinuation(options: {
   config: BotConfig;
   flow: ApprovalFlow;
   bot: Bot;
+  actorOpenId?: string;
 }): Promise<void> {
-  const { runtime, config, flow, bot } = options;
+  const { runtime, config, flow, bot, actorOpenId } = options;
   const session = runtime.sessions.get(flow.sessionId);
   if (!session || session.status === 'closed') {
     throw new Error('对应的 CLI 会话已经失效。');
@@ -50,6 +51,7 @@ export async function scheduleApprovalContinuation(options: {
       config,
       flow,
       run,
+      actorOpenId,
     }).catch((error) => {
       console.error('[审批] 继续执行失败:', (error as Error).message);
     });
@@ -243,6 +245,7 @@ export function createCardActionHandler(options: {
             flow: answered.flow,
             run,
             defaultDeliveryMode: defaultProductDeliveryMode,
+            actorOpenId: action.operatorOpenId,
           }).catch((error) => {
             console.error('[澄清] 继续执行失败:', (error as Error).message);
           });
@@ -320,6 +323,7 @@ export function createCardActionHandler(options: {
           config,
           flow: resolved,
           bot: botRuntime.bot,
+          actorOpenId: action.operatorOpenId,
         });
         return {
           toast: {

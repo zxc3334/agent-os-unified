@@ -122,14 +122,12 @@ export interface UnifiedTaskRuntimeOptions<Context = unknown> {
  * callers. It owns task lifecycle, authorization propagation, cancellation and
  * durable outcome reporting; transport and model/CLI details stay in adapters.
  *
- * Integration remains intentionally pending: Lark message handling in
- * `command-handler.ts`, scheduled dispatch/runs, collaboration and approval or
- * clarification continuations, card actions, and product comments must each
- * map their authenticated identity, affair, original source time, authorized
- * memory spaces, input, and AbortSignal into this seam. Their existing delivery
- * and native-session behavior is not changed here. In particular, callers must
- * derive authority before entering this module; executor/model output is only
- * stored as result data and is never re-read as identity or permission.
+ * Ordinary messages, scheduled runs, and approval/clarification/comment
+ * continuations adapt existing execution paths through this seam. Collaboration
+ * and affair-native-session isolation remain separate integration work. Adapters
+ * preserve their existing delivery and native-session behavior; callers derive
+ * authority before entering this module, and executor/model output is only stored
+ * as result data, never re-read as identity or permission.
  *
  * A run resolves with its final record, including failed/cancelled outcomes.
  * Storage and adapter setup failures are not disguised as task outcomes.
