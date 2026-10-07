@@ -30,6 +30,7 @@ test('daily and reminder command parsing is bounded and rejects malformed comman
   assert.deepEqual(parseCommand('/daily scope record-1 reading'), { name: 'daily', action: 'scope', recordId: 'record-1', scopeId: 'reading' });
   assert.deepEqual(parseCommand('/reminder add 后天上午9点 :: Call mom'), { name: 'reminder', action: 'add', due: '后天上午9点', content: 'Call mom' });
   assert.deepEqual(parseCommand('/reminder edit reminder-1 明天 10:30 :: Call mom'), { name: 'reminder', action: 'edit', reminderId: 'reminder-1', due: '明天 10:30', content: 'Call mom' });
+  assert.deepEqual(parseCommand('/reminder retry reminder-1'), { name: 'reminder', action: 'retry', reminderId: 'reminder-1' });
   assert.equal(parseCommand('/reminder add tomorrow'), undefined);
 });
 
@@ -56,6 +57,17 @@ test('private daily records and reminders persist with trusted source dates and 
     await handleSessionCommand({ ...ctx.options, command: parseCommand(`/reminder cancel ${reminder.id}`) });
     assert.equal(ctx.dailyRecords.getReminder(reminder.id)?.status, 'cancelled');
     assert.deepEqual(ctx.cancelled, [reminder.id]);
+
+    const failed = ctx.dailyRecords.createReminder({
+      operationId: 'failed-reminder', content: 'Try again', dueAt: '2026-10-07T12:30:00.000Z',
+      source: { sourceId: 'failure-source', actorId: 'owner', receivedAt: ctx.options.msg.receivedAt, timezone: 'Asia/Shanghai' },
+      deliveryTarget: { botId: 'assistant', chatId: 'owner-dm' },
+    });
+    ctx.dailyRecords.recordDeliveryOutcome(failed.id, { outcome: 'failed', attemptedAt: ctx.options.msg.receivedAt });
+    await handleSessionCommand({ ...ctx.options, msg: { ...ctx.options.msg, messageId: 'retry-msg' }, command: parseCommand(`/reminder retry ${failed.id}`) });
+    assert.equal(ctx.dailyRecords.getReminder(failed.id)?.status, 'scheduled');
+    assert.ok(ctx.scheduled.includes(failed.id));
+    assert.match(ctx.replies.at(-1)!, /实际发送回执/);
     assert.equal(ctx.dailyRecords.getRecord(record.id)?.content, 'Read a chapter about attention');
   } finally { await rm(ctx.directory, { recursive: true, force: true }); }
 });

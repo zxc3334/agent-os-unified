@@ -166,7 +166,13 @@ export async function handleSessionCommand(options: {
         const reminder = dailyRecords.cancelReminder(command.reminderId, msg.receivedAt);
         personalReminderScheduler?.cancel(command.reminderId);
         await bot.reply(msg.messageId, reminder ? `提醒已取消；原日期事实或日常记录不会删除。` : "没有找到这条提醒。", hasThread);
-      } else {
+      } else if (command.action === "retry") {
+        if (!personalReminderScheduler) throw new Error("提醒调度器尚未就绪");
+        const reminder = dailyRecords.retryFailedReminder(command.reminderId, msg.receivedAt);
+        if (!reminder) throw new Error("没有找到可重试的失败提醒");
+        personalReminderScheduler.schedule(reminder);
+        await bot.reply(msg.messageId, `已重新安排提醒 [${reminder.id}]，计划时间 ${reminder.dueAt}；最终送达状态会以实际发送回执为准。`, hasThread);
+      } else if (command.action === "edit") {
         const current = dailyRecords.getReminder(command.reminderId!);
         if (!current) throw new Error("没有找到这条提醒");
         const dueAt = resolveRelativeDue(command.due, source);

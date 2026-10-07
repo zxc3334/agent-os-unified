@@ -94,6 +94,16 @@ test('delivery outcomes remain explicit and recovery marks overdue scheduled rem
   assert.equal(store.getReminder(failed.id)?.deliveryAttempts.length, 2);
   assert.equal(store.getReminder(failed.id)?.updatedAt, '2026-10-07T03:02:00.000Z');
 
+  const retryable = store.createReminder({
+    operationId: 'retryable', content: 'Retry without editing', dueAt: '2026-10-07T03:00:00.000Z', source,
+  });
+  store.recordDeliveryOutcome(retryable.id, { outcome: 'failed', attemptedAt: '2026-10-07T03:01:00.000Z' });
+  const retried = store.retryFailedReminder(retryable.id, '2026-10-07T03:03:00.000Z');
+  assert.equal(retried?.status, 'scheduled');
+  assert.equal(retried?.lastDeliveryOutcome, 'failed');
+  assert.equal(retried?.deliveryAttempts.length, 1);
+  assert.equal(store.retryFailedReminder(retryable.id, '2026-10-07T03:04:00.000Z'), undefined);
+
   const unknown = store.createReminder({
     operationId: 'unknown', content: 'Receipt unavailable', dueAt: '2026-10-07T03:00:00.000Z', source,
   });
@@ -104,7 +114,7 @@ test('delivery outcomes remain explicit and recovery marks overdue scheduled rem
     operationId: 'overdue', content: 'Was offline', dueAt: '2026-10-07T03:00:00.000Z', source,
   });
   const missed = store.markMissedThrough('2026-10-07T04:00:00.000Z');
-  assert.deepEqual(missed.map((item) => item.id), [unknown.id, overdue.id]);
+  assert.deepEqual(missed.map((item) => item.id), [retryable.id, unknown.id, overdue.id]);
   assert.equal(store.getReminder(overdue.id)?.status, 'missed');
   assert.equal(store.getReminder(unknown.id)?.status, 'missed');
 });

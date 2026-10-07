@@ -273,6 +273,13 @@ export class JsonDailyRecordsReminders {
     this.mutate(() => { this.replaceReminder(updated); });
     return structuredClone(updated);
   }
+  retryFailedReminder(id: string, retriedAt: string): DailyReminder | undefined {
+    const current = this.state.reminders.find((item) => item.id === id);
+    if (!current || current.status !== 'failed') return undefined;
+    const updated: DailyReminder = { ...current, status: 'scheduled', updatedAt: validIso(retriedAt, 'retriedAt') };
+    this.mutate(() => { this.replaceReminder(updated); });
+    return structuredClone(updated);
+  }
   cancelReminder(id: string, cancelledAt: string): DailyReminder | undefined {
     const current = this.state.reminders.find((item) => item.id === id);
     if (!current) return undefined;

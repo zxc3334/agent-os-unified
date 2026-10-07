@@ -34,3 +34,6 @@
 - MCP tool names are normalized through CLI adapters. Tests exercise durable capture, author/user stance separation, timezone conversion, private delivery target, scope denial/isolation, and CLI alias mapping.
 - Verification: `pnpm test` (67/67), `pnpm build`, `git diff --check`.
 - Remaining: natural-language clarification when key date/time details are missing, user-facing retry of failed delivery, richer author/user feedback, and summary/review integration. Ticket remains in progress.
+
+- Follow-up: failed reminders can now be retried by the owner in private chat with `/reminder retry <ID>`. Only `failed` reminders are eligible; retry preserves the previous attempt history and returns to `scheduled`, while successful delivery remains contingent on a transport receipt. Tests cover retry eligibility, persistence behavior, scheduling callback, and honest response wording.
+- Verification after this change: `pnpm test` (86/86), `pnpm build`, `git diff --check`.

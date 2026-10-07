@@ -23,7 +23,7 @@ export type SlashCommand =
   | { name: 'daily'; action: 'scope'; recordId: string; scopeId: string | null }
   | { name: 'reminder'; action: 'list' }
   | { name: 'reminder'; action: 'add' | 'edit'; reminderId?: string; due: string; content: string }
-  | { name: 'reminder'; action: 'cancel'; reminderId: string }
+  | { name: 'reminder'; action: 'cancel' | 'retry'; reminderId: string }
   | { name: 'memory'; action: 'review' | 'recent'; page: number }
   | { name: 'memory'; action: 'extract' | 'spaces' }
   | { name: 'memory'; action: 'space-create'; nameText: string }
@@ -80,8 +80,8 @@ export function parseCommand(text: string): SlashCommand | undefined {
   if (reminderMatch) {
     const args = reminderMatch[1]?.trim() ?? '';
     if (!args || args === 'list') return { name: 'reminder', action: 'list' };
-    const cancel = /^cancel\s+([a-zA-Z0-9_-]{1,100})$/.exec(args);
-    if (cancel) return { name: 'reminder', action: 'cancel', reminderId: cancel[1]! };
+    const cancel = /^(cancel|retry)\s+([a-zA-Z0-9_-]{1,100})$/.exec(args);
+    if (cancel) return { name: 'reminder', action: cancel[1] as 'cancel' | 'retry', reminderId: cancel[2]! };
     const add = /^add\s+([\s\S]+?)\s*::\s*([\s\S]+)$/.exec(args);
     if (add?.[1]?.trim() && add[2]?.trim()) return { name: 'reminder', action: 'add', due: add[1]!.trim(), content: add[2]!.trim() };
     const edit = /^edit\s+([a-zA-Z0-9_-]{1,100})\s+([\s\S]+?)\s*::\s*([\s\S]+)$/.exec(args);

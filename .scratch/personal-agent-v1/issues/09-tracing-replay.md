@@ -18,6 +18,7 @@
 
 ## Implementation status
 
-- Added content-free lifecycle trace events with opaque task/source/artifact IDs and failure codes; diagnostic sink failures are best-effort and never change task outcomes.
+- Added content-free lifecycle trace events with opaque task/source/artifact IDs and failure codes. Trace history is persisted in the task record and survives restart via existing `get` / `list`; best-effort trace writes never change task outcomes, and legacy records load with empty history.
 - Added 25 versioned synthetic replay cases and basic version/result contract tests.
-- Remaining: trace persistence and safe matter-level inspection, stronger independent assertions for replay behavior (avoid fixtures that manufacture expected outputs), and privacy/revocation lifecycle integration. This ticket is not complete.
+- Remaining: user-facing matter-level trace inspection, stronger independent assertions for replay behavior (avoid fixtures that manufacture expected outputs), and privacy/revocation lifecycle integration. This ticket is not complete.
+- Verification after trace persistence: `pnpm test` (86/86 integrated), `pnpm build`, `git diff --check`.
